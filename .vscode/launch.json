@@ -1,0 +1,34 @@
+{
+    "version": "0.2.0",
+    "configurations": [
+        {
+            "name": "Debug Shadow Stack",
+            "type": "cppdbg",
+            "request": "launch",
+            "program": "${workspaceFolder}/test/ShadowStack/main.exe",
+            "args": [],
+            "stopAtEntry": true,
+            "cwd": "${workspaceFolder}",
+            "environment": [
+                {
+                    "name": "LD_PRELOAD",
+                    "value": "${workspaceFolder}/SSRuntime/libruntime.so"
+                }
+            ],
+            "externalConsole": false,
+            "MIMode": "gdb",
+            "setupCommands": [
+                {
+                    "description": "Enable pretty-printing for gdb",
+                    "text": "-enable-pretty-printing",
+                    "ignoreFailures": true
+                },
+                {
+                    "description": "Allow optimization stepping",
+                    "text": "set step-mode on",
+                    "ignoreFailures": true
+                }
+            ]
+        }
+    ]
+}
