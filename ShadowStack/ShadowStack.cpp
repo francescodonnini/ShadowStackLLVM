@@ -33,23 +33,23 @@ void SSFunctionPass::instrumentPreamble(Function &F) {
 
   auto *Int64Ty = Builder.getInt64Ty();
   auto *GsPtrTy = PointerType::get(Int64Ty, GS_ADDR_SPACE);
-  auto *Int64PtrTy = PointerType::get(Int64Ty, 0);
+  auto *Int64PtrTy = PointerType::getUnqual(Int64Ty);
 
   // Push return address at the top of the stack
-  // 1. SSOPtr is the HANDLE to the shadow stack object stored in gs:0
+  // 1. SSOPtr is the pointer to the shadow stack object stored in gs:0
   auto *SSOPtr = Builder.CreateIntToPtr(Builder.getInt64(0), GsPtrTy, "ss_obj_ptr");
 
   // 2. Load the address of the next shadow stack's slot stored in gs:0
-  auto *SSPTopVal = Builder.CreateLoad(Int64Ty, SSOPtr, true, "ss_top_val");
-
-  auto *SSPTopValClean = Builder.CreateOr(SSPTopVal, Builder.getInt64(0), "ss_top_clean");
-  auto *SSPTopPtr = Builder.CreateIntToPtr(SSPTopValClean, Int64PtrTy, "ss_top_ptr");
+  auto *SSObjAdr = Builder.CreateLoad(Int64Ty, SSOPtr, true, "ss_obj_adr");
+  auto *SSObjPtr = Builder.CreateIntToPtr(SSObjAdr, Int64PtrTy, "ss_obj_ptr");
+  auto *SSPTopVal = Builder.CreateLoad(Int64Ty, SSObjPtr, true, "ss_top");
 
   // 3. Store the return address to the top of the shadow stack
   auto *GetRetAdr = Intrinsic::getOrInsertDeclaration(F.getParent(), Intrinsic::returnaddress);
   auto *RetAdrPtr = Builder.CreateCall(GetRetAdr, {Builder.getInt32(0)});
   auto *RetAdr = Builder.CreatePtrToInt(RetAdrPtr, Int64Ty);
-  auto *StoreRetAddr = Builder.CreateStore(RetAdr, SSPTopPtr, true);
+  auto *SSPTopPtr = Builder.CreateIntToPtr(SSPTopVal, Int64PtrTy, "ss_top_ptr");
+  Builder.CreateStore(RetAdr, SSPTopPtr, true);
 
   // 4. Advance the top of the shadow stack
   auto *NewSSPTopVal = Builder.CreateAdd(SSPTopVal, Builder.getInt64(8), "ss_push");
@@ -82,7 +82,9 @@ void SSFunctionPass::instrumentRet(Function &F, ReturnInst &I) {
   auto *SSOPtr = Builder.CreateIntToPtr(Builder.getInt64(0), GsPtrTy);
 
   // 2. Load the current top of the shadow stack
-  auto *SSPTopVal = Builder.CreateLoad(Int64Ty, SSOPtr, true, "ss_top");
+  auto *SSObjAdr = Builder.CreateLoad(Int64Ty, SSOPtr, true, "ss_obj_adr");
+  auto *SSObjPtr = Builder.CreateIntToPtr(SSObjAdr, Int64PtrTy, "ss_obj_ptr");
+  auto *SSPTopVal = Builder.CreateLoad(Int64Ty, SSObjPtr, true, "ss_top");
   
   // 3. Decrement the current stack pointer and update the shadow stack pointer
   auto *NewSSPTopVal = Builder.CreateSub(SSPTopVal, Builder.getInt64(8), "ss_pop");
