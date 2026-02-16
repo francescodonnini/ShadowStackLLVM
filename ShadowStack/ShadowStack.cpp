@@ -29,28 +29,33 @@ PreservedAnalyses SSFunctionPass::run(Function &F, FunctionAnalysisManager &FAM)
 
 void SSFunctionPass::instrumentPreamble(Function &F) {
   auto &EntryBB = F.getEntryBlock();
-  
   IRBuilder<> Builder(&EntryBB, EntryBB.getFirstNonPHIIt());
 
   auto *Int64Ty = Builder.getInt64Ty();
   auto *GsPtrTy = PointerType::get(Int64Ty, GS_ADDR_SPACE);
-  
-  // Calculate new top of stack
-  auto *ShadowAreaPtr = Builder.CreateIntToPtr(Builder.getInt64(0), GsPtrTy);
-  auto *SSTop = Builder.CreateLoad(Int64Ty, ShadowAreaPtr, true);
-  auto *NewSSTop = Builder.CreateAdd(SSTop, Builder.getInt64(8));
+  auto *Int64PtrTy = PointerType::get(Int64Ty, 0);
 
-  // Update stack's header (gs:0) with new top of stack
-  Builder.CreateStore(NewSSTop, ShadowAreaPtr, true);
+  // Push return address at the top of the stack
+  // 1. SSOPtr is the HANDLE to the shadow stack object stored in gs:0
+  auto *SSOPtr = Builder.CreateIntToPtr(Builder.getInt64(0), GsPtrTy, "ss_obj_ptr");
 
-  // Get return address
-  auto *GetRetAddr = Intrinsic::getOrInsertDeclaration(F.getParent(), Intrinsic::returnaddress);
-  auto *RetAddrPtr = Builder.CreateCall(GetRetAddr, {Builder.getInt32(0)});
-  auto *RetAddr = Builder.CreatePtrToInt(RetAddrPtr, Int64Ty);
+  // 2. Load the address of the next shadow stack's slot stored in gs:0
+  auto *SSPTopVal = Builder.CreateLoad(Int64Ty, SSOPtr, true, "ss_top_val");
 
-  // Store return address at the top of the shadow stack
-  auto *NewSSTopPtr = Builder.CreateIntToPtr(NewSSTop, GsPtrTy);
-  auto *StoreRetAddr = Builder.CreateStore(RetAddr, NewSSTopPtr, true);
+  auto *SSPTopValClean = Builder.CreateOr(SSPTopVal, Builder.getInt64(0), "ss_top_clean");
+  auto *SSPTopPtr = Builder.CreateIntToPtr(SSPTopValClean, Int64PtrTy, "ss_top_ptr");
+
+  // 3. Store the return address to the top of the shadow stack
+  auto *GetRetAdr = Intrinsic::getOrInsertDeclaration(F.getParent(), Intrinsic::returnaddress);
+  auto *RetAdrPtr = Builder.CreateCall(GetRetAdr, {Builder.getInt32(0)});
+  auto *RetAdr = Builder.CreatePtrToInt(RetAdrPtr, Int64Ty);
+  auto *StoreRetAddr = Builder.CreateStore(RetAdr, SSPTopPtr, true);
+
+  // 4. Advance the top of the shadow stack
+  auto *NewSSPTopVal = Builder.CreateAdd(SSPTopVal, Builder.getInt64(8), "ss_push");
+
+  // 5. Store the new shadow stack pointer in gs:0
+  Builder.CreateStore(NewSSPTopVal, SSOPtr, true);
 }
 
 void SSFunctionPass::instrumentEpilogue(Function &F) {
@@ -71,41 +76,44 @@ void SSFunctionPass::instrumentRet(Function &F, ReturnInst &I) {
 
   auto *Int64Ty = Builder.getInt64Ty();
   auto *GsPtrTy = PointerType::get(Int64Ty, GS_ADDR_SPACE);
+  auto *Int64PtrTy = PointerType::get(Int64Ty, 0);
 
-  // Load from shadow stack
-  auto *SSTopPtr = Builder.CreateIntToPtr(Builder.getInt64(-8), GsPtrTy);
-  auto *SSTop = Builder.CreateLoad(Int64Ty, SSTopPtr, true);
+  // 1. SSPVar is an HANDLE to gs:0
+  auto *SSOPtr = Builder.CreateIntToPtr(Builder.getInt64(0), GsPtrTy);
+
+  // 2. Load the current top of the shadow stack
+  auto *SSPTopVal = Builder.CreateLoad(Int64Ty, SSOPtr, true, "ss_top");
+  
+  // 3. Decrement the current stack pointer and update the shadow stack pointer
+  auto *NewSSPTopVal = Builder.CreateSub(SSPTopVal, Builder.getInt64(8), "ss_pop");
+  Builder.CreateStore(NewSSPTopVal, SSOPtr, true);
+
+  // 5. Read the return address from the top of the stack
+  auto *NewSSPTopPtr = Builder.CreateIntToPtr(NewSSPTopVal, Int64PtrTy);
+  auto *ShadowRetVal = Builder.CreateLoad(Int64Ty, NewSSPTopPtr, true);
 
   // Get return address
-  auto *GetRetAddr = Intrinsic::getOrInsertDeclaration(I.getModule(), Intrinsic::returnaddress);
-  auto *RetAddrPtr = Builder.CreateCall(GetRetAddr, {Builder.getInt32(0)});
-  auto *RetAddr = Builder.CreatePtrToInt(RetAddrPtr, Int64Ty);
+  auto *GetRetAdr = Intrinsic::getOrInsertDeclaration(I.getModule(), Intrinsic::returnaddress);
+  auto *RetAdrPtr = Builder.CreateCall(GetRetAdr, {Builder.getInt32(0)});
+  auto *RetAdr = Builder.CreatePtrToInt(RetAdrPtr, Int64Ty);
 
   // Compare return address
-  auto *Compare = Builder.CreateICmpNE(SSTop, RetAddr);
+  auto *Compare = Builder.CreateICmpNE(ShadowRetVal, RetAdr);
 
   auto *CheckBB = I.getParent();
-  auto *RetBB = CheckBB->splitBasicBlock(&I);
-
+  auto *RetBB = CheckBB->splitBasicBlock(&I, "ss_ret");
   CheckBB->getTerminator()->eraseFromParent();
 
   // Fail path
-  auto *TrueBr = BasicBlock::Create(F.getContext(), "ss_fail", &F);
-  IRBuilder<> TBuilder(TrueBr);
+  auto *FailBB = BasicBlock::Create(F.getContext(), "ss_fail", &F);
+  IRBuilder<> FailPathBuilder(FailBB);
   auto *Trap = Intrinsic::getOrInsertDeclaration(F.getParent(), Intrinsic::trap);
-  TBuilder.CreateCall(Trap);
-  TBuilder.CreateUnreachable();
+  FailPathBuilder.CreateCall(Trap);
+  FailPathBuilder.CreateUnreachable();
 
   // Link CheckBB to FailBB + RetBB
   Builder.SetInsertPoint(CheckBB);
-  Builder.CreateCondBr(Compare, TrueBr, RetBB);
-
-  // Success path
-  IRBuilder<> FBuilder(&RetBB->front());
-  auto *NewTop = FBuilder.CreateSub(SSTopPtr, Builder.getInt64(8), "ss_pop");
-
-  auto *PopHeadPtr = FBuilder.CreateIntToPtr(FBuilder.getInt64(-8), GsPtrTy);
-  FBuilder.CreateStore(NewTop, PopHeadPtr, true);
+  Builder.CreateCondBr(Compare, FailBB, RetBB);
 }
 
 extern "C" ::llvm::PassPluginLibraryInfo LLVM_ATTRIBUTE_WEAK

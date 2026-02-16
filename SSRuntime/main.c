@@ -16,9 +16,9 @@
 #define MEM_SIZE (64ULL * 1024 * 1024 * 1024)
 
 typedef struct SSChunk {
-    SSChunk   *sa_next;
-    uint64_t sa_start;
-    uint64_t sa_ra[];
+    uint64_t *top;
+    struct SSChunk  *next;
+    uint64_t  data[];
 } SSChunk;
 
 static SSChunk *freelist = NULL;
@@ -57,22 +57,26 @@ static SSChunk* alloc_chunk(void) {
         perror("[ShadowStack] mmap failed");
         exit(1);
     }
+    SSChunk *chunk = (SSChunk*)p;
+    chunk->top = chunk->data;
 
-    return (SSChunk*)p;
+    return chunk;
 }
 
 static SSChunk* get_chunk(void) {
     SSChunk *p = NULL;
 
     lock_list();
-    if (freelist == NULL) {
+    if (freelist != NULL) {
         p = freelist;
-        freelist = p->sa_next;
+        freelist = p->next;
     }
     unlock_list();
 
     if (p == NULL) {
         p = alloc_chunk();
+    } else {
+        p->top = p->data;
     }
 
     return p;
@@ -86,7 +90,7 @@ static void put_chunk(SSChunk *chunk) {
     madvise(chunk, SS_SIZE, MADV_DONTNEED);
 
     lock_list();
-    chunk->sa_next = freelist;
+    chunk->next = freelist;
     freelist = chunk;
     unlock_list();
 }
@@ -100,8 +104,7 @@ void SSInit(void) {
     }
     
     if (pool != SS_BASE) {
-        fprintf(stderr, "[ShadowStack] Kernel refused address %p. Got %p\n", 
-                SS_BASE, pool);
+        fprintf(stderr, "[ShadowStack] Kernel refused address %p. Got %p\n", SS_BASE, pool);
         exit(1);
     }
 
