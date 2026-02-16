@@ -127,16 +127,8 @@ llvmGetPassPluginInfo() {
       // level is at least -O2
       PB.registerPipelineStartEPCallback(
         [](ModulePassManager &MPM, OptimizationLevel OL) {
-          if (OL.getSpeedupLevel() >= 2) {
-            // Since `PassBuilder::registerPipelineStartEPCallback`
-            // only accept ModulePass, we need an adapter to make
-            // it work.
-            MPM.addPass(createModuleToFunctionPassAdaptor(SSFunctionPass()));
-            
-            errs() << "[ss] ShadowStack registered successfully\n";
-          } else {
-            errs() << "[ss] ShadowStack registered successfully\n";
-          }
+          MPM.addPass(createModuleToFunctionPassAdaptor(SSFunctionPass()));
+          errs() << "[ss] ShadowStack registered successfully\n";
         });
 
       PB.registerPipelineParsingCallback(
