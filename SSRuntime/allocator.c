@@ -5,6 +5,7 @@
 #include <stdio.h>
 #include <stdlib.h>
 
+#include <immintrin.h>
 #include <sched.h>
 #include <sys/mman.h>
 #define MAX_TRIES (100)
@@ -23,7 +24,7 @@ static void *freearea_end;
 
 static inline void lock_list(void) {
     while (atomic_flag_test_and_set(&llock)) {
-        sched_yield();
+        _mm_pause();
     }
 }
 
