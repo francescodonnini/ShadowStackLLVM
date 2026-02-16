@@ -73,10 +73,8 @@ void SSFunctionPass::instrumentRet(Function &F, ReturnInst &I) {
   auto *GsPtrTy = PointerType::get(Int64Ty, GS_ADDR_SPACE);
 
   // Load from shadow stack
-  auto *SSAreaPtr = Builder.CreateIntToPtr(Builder.getInt64(0), GsPtrTy);
-  auto *SSTop = Builder.CreateLoad(Int64Ty, SSAreaPtr, true);
-  auto *SSTopPtr = Builder.CreateIntToPtr(SSTop, GsPtrTy);
-  auto *ShadowRetAddr = Builder.CreateLoad(Int64Ty, SSTopPtr, true);
+  auto *SSTopPtr = Builder.CreateIntToPtr(Builder.getInt64(-8), GsPtrTy);
+  auto *SSTop = Builder.CreateLoad(Int64Ty, SSTopPtr, true);
 
   // Get return address
   auto *GetRetAddr = Intrinsic::getOrInsertDeclaration(I.getModule(), Intrinsic::returnaddress);
@@ -84,7 +82,7 @@ void SSFunctionPass::instrumentRet(Function &F, ReturnInst &I) {
   auto *RetAddr = Builder.CreatePtrToInt(RetAddrPtr, Int64Ty);
 
   // Compare return address
-  auto *Compare = Builder.CreateICmpNE(ShadowRetAddr, RetAddr);
+  auto *Compare = Builder.CreateICmpNE(SSTop, RetAddr);
 
   auto *CheckBB = I.getParent();
   auto *RetBB = CheckBB->splitBasicBlock(&I);
@@ -104,9 +102,9 @@ void SSFunctionPass::instrumentRet(Function &F, ReturnInst &I) {
 
   // Success path
   IRBuilder<> FBuilder(&RetBB->front());
-  auto *NewTop = FBuilder.CreateSub(SSTop, Builder.getInt64(8), "ss_pop");
+  auto *NewTop = FBuilder.CreateSub(SSTopPtr, Builder.getInt64(8), "ss_pop");
 
-  auto *PopHeadPtr = FBuilder.CreateIntToPtr(FBuilder.getInt64(0), GsPtrTy);
+  auto *PopHeadPtr = FBuilder.CreateIntToPtr(FBuilder.getInt64(-8), GsPtrTy);
   FBuilder.CreateStore(NewTop, PopHeadPtr, true);
 }
 
