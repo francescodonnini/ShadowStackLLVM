@@ -45,11 +45,22 @@ void SSFunctionPass::instrumentPreamble(Function &F) {
   auto *SSPTopVal = Builder.CreateLoad(Int64Ty, SSObjPtr, true, "ss_top");
 
   // 3. Store the return address to the top of the shadow stack
-  auto *GetRetAdr = Intrinsic::getOrInsertDeclaration(F.getParent(), Intrinsic::returnaddress);
-  auto *RetAdrPtr = Builder.CreateCall(GetRetAdr, {Builder.getInt32(0)});
-  auto *RetAdr = Builder.CreatePtrToInt(RetAdrPtr, Int64Ty);
+  // Read te retun address from the stack
+  // WARNING: Intrinsic::returnaddress might reuse the register populated by the preamble instrumentation to
+  // get the return address so it is useless in this scenario
+  auto *FrameAddrFn = Intrinsic::getOrInsertDeclaration(F.getParent(), Intrinsic::frameaddress, {Int64PtrTy});
+  auto *FramePtr = Builder.CreateCall(FrameAddrFn, {Builder.getInt32(0)});
+
+  // On x86_64, return address is at [rbp + 8]
+  auto *FramePtrAdr = Builder.CreatePtrToInt(FramePtr, Int64Ty);
+  auto *RetAdrPtrVal = Builder.CreateAdd(FramePtrAdr, Builder.getInt64(8), "ss_ret_ptr");
+
+  // Load the return address
+  auto *RetAdrPtr = Builder.CreateIntToPtr(RetAdrPtrVal, Int64PtrTy);
+  auto *RetAdrVal = Builder.CreateLoad(Int64Ty, RetAdrPtr);
+
   auto *SSPTopPtr = Builder.CreateIntToPtr(SSPTopVal, Int64PtrTy, "ss_top_ptr");
-  Builder.CreateStore(RetAdr, SSPTopPtr, true);
+  Builder.CreateStore(RetAdrVal, SSPTopPtr, true);
 
   // 4. Advance the top of the shadow stack
   auto *NewSSPTopVal = Builder.CreateAdd(SSPTopVal, Builder.getInt64(8), "ss_push");
@@ -90,17 +101,26 @@ void SSFunctionPass::instrumentRet(Function &F, ReturnInst &I) {
   auto *NewSSPTopVal = Builder.CreateSub(SSPTopVal, Builder.getInt64(8), "ss_pop");
   Builder.CreateStore(NewSSPTopVal, SSOPtr, true);
 
-  // 5. Read the return address from the top of the stack
+  // 5. Read the return address from the top of the shadow stack
   auto *NewSSPTopPtr = Builder.CreateIntToPtr(NewSSPTopVal, Int64PtrTy);
   auto *ShadowRetVal = Builder.CreateLoad(Int64Ty, NewSSPTopPtr, true);
 
-  // Get return address
-  auto *GetRetAdr = Intrinsic::getOrInsertDeclaration(I.getModule(), Intrinsic::returnaddress);
-  auto *RetAdrPtr = Builder.CreateCall(GetRetAdr, {Builder.getInt32(0)});
-  auto *RetAdr = Builder.CreatePtrToInt(RetAdrPtr, Int64Ty);
+  // Read te retun address from the stack
+  // WARNING: Intrinsic::returnaddress might reuse the register populated by the preamble instrumentation to
+  // get the return address so it is useless in this scenario
+  auto *FrameAddrFn = Intrinsic::getOrInsertDeclaration(I.getModule(), Intrinsic::frameaddress, {Int64PtrTy});
+  auto *FramePtr = Builder.CreateCall(FrameAddrFn, {Builder.getInt32(0)});
 
+  // On x86_64, return address is at [rbp + 8]
+  auto *FramePtrAdr = Builder.CreatePtrToInt(FramePtr, Int64Ty);
+  auto *RetAdrPtrVal = Builder.CreateAdd(FramePtrAdr, Builder.getInt64(8), "ss_ret_ptr");
+
+  // Load the return address
+  auto *RetAdrPtr = Builder.CreateIntToPtr(RetAdrPtrVal, Int64PtrTy);
+  auto *RetAdrVal = Builder.CreateLoad(Int64Ty, RetAdrPtr);
+  
   // Compare return address
-  auto *Compare = Builder.CreateICmpNE(ShadowRetVal, RetAdr);
+  auto *Compare = Builder.CreateICmpNE(ShadowRetVal, RetAdrVal);
 
   auto *CheckBB = I.getParent();
   auto *RetBB = CheckBB->splitBasicBlock(&I, "ss_ret");
