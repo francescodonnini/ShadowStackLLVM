@@ -1,13 +1,10 @@
 #define _GNU_SOURCE
 #include "allocator.h"
 #include <stddef.h>
-#include <stdint.h>
 #include <stdio.h>
 #include <stdlib.h>
 
 #include <asm/prctl.h>
-#include <sched.h>
-#include <sys/mman.h>
 #include <sys/syscall.h>
 #include <unistd.h>
 

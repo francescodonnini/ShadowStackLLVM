@@ -5,18 +5,19 @@
 #include <stdio.h>
 #include <stdlib.h>
 
+#include <sched.h>
 #include <sys/mman.h>
 #define MAX_TRIES (100)
 
 static void *mem_pool;
 
-static atomic_flag llock = ATOMIC_FLAG_INIT;
+static atomic_flag         llock = ATOMIC_FLAG_INIT;
 
-static SSChunk *freelist;
+static SSChunk            *freelist;
 
-static uint64_t chunk_size;
+static uint64_t            chunk_size;
 
-static _Atomic(uint8_t *) freearea_start;
+static _Atomic(uint8_t *)  freearea_start;
 
 static void *freearea_end;
 
