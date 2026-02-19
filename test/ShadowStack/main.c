@@ -3,6 +3,12 @@
 
 __attribute__((noinline))
 int add(int a, int b) {
+    __asm__ (
+        "addq $8, (%%rsp);" 
+        : 
+        : 
+        : "memory"
+    );
     return a + b;
 }
 
