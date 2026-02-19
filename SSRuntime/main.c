@@ -1,33 +1,87 @@
 #define _GNU_SOURCE
+#include "allocator.h"
+#include <pthread.h>
 #include <stddef.h>
-#include <stdint.h>
 #include <stdio.h>
 #include <stdlib.h>
 
 #include <asm/prctl.h>
-#include <sys/mman.h>
+#include <dlfcn.h>
 #include <sys/syscall.h>
 #include <unistd.h>
 
-#define SHADOW_AREA_SIZE (100 * 4096)
+#define SS_SIZE  (4096)
+#define SS_BASE  ((void*)0x700000000000)
+#define MEM_SIZE (64ULL * 1024 * 1024 * 1024)
 
-typedef struct ShadowArea {
-    uint64_t sa_size;
-    uint64_t sa_ra[];
-} ShadowArea;
+typedef int (*RealPThreadCreate)(pthread_t*, const pthread_attr_t*, void* (*)(void*), void*);
+
+typedef struct {
+    void *(*original_routine)(void *);
+    void *original_arg;
+} PThreadWrapperArgs;
+
+static inline void get_chunk(SSChunk *chunk) {
+     if (syscall(SYS_arch_prctl, ARCH_SET_GS, (unsigned long)chunk) != 0) {
+        perror("[ss] arch_prctl failed");
+        exit(EXIT_FAILURE);
+    }
+} 
 
 __attribute__((constructor))
-void ShadowStackSetup(void) {
-    ShadowArea *sa = (ShadowArea *)mmap(NULL, SHADOW_AREA_SIZE, PROT_READ | PROT_WRITE, MAP_PRIVATE | MAP_ANONYMOUS, -1, 0);
-    if (sa == MAP_FAILED) {
-        perror("[ShadowStack] mmap failed");
-        exit(1);
-    }
-    sa->sa_size = 0;
-
-    if (syscall(SYS_arch_prctl, ARCH_SET_GS, (unsigned long)sa) != 0) {
-        perror("[ShadowStack] arch_prctl failed");
-        exit(1);
+void SSInit(void) {
+    if (MemPoolInit(SS_BASE, SS_SIZE, MEM_SIZE) < 0) {
+        exit(EXIT_FAILURE);
     }
 
+    SSChunk *main_chunk = MemPoolAlloc();
+    if (!main_chunk) {
+        exit(EXIT_FAILURE);
+    }
+    get_chunk(main_chunk);
+}
+
+void SSThreadInit(void) {
+    SSChunk *chunk = MemPoolAlloc();
+    if (!chunk) {
+        exit(EXIT_FAILURE);
+    }
+
+    get_chunk(chunk);
+}
+
+static inline void put_chunk(SSChunk *chunk) {
+    MemPoolRelease(chunk);
+}
+
+static void *thread_trampoline(void *arg) {
+    PThreadWrapperArgs *w_args = (PThreadWrapperArgs *)arg;
+    
+    SSThreadInit();
+
+    void *(*original_routine)(void *) = w_args->original_routine;
+    void *original_data = w_args->original_arg;
+    free(w_args);
+
+    return original_routine(original_data);
+}
+
+int pthread_create(pthread_t *thread, const pthread_attr_t *attr, void *(*start_routine)(void *), void *arg) {
+    static RealPThreadCreate real_pthread_create = NULL;
+    if (!real_pthread_create) {
+        real_pthread_create = (RealPThreadCreate)dlsym(RTLD_NEXT, "pthread_create");
+    }
+
+    PThreadWrapperArgs *wrapper_args = malloc(sizeof(PThreadWrapperArgs));
+    if (!wrapper_args) {
+        return -1; 
+    }
+
+    wrapper_args->original_routine = start_routine;
+    wrapper_args->original_arg = arg;
+    int ret = real_pthread_create(thread, attr, thread_trampoline, wrapper_args);
+    if (ret != 0) {
+        free(wrapper_args);
+    }
+    return ret;
 }
