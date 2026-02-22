@@ -9,7 +9,7 @@ typedef struct SSChunk {
     uint64_t        data[];
 } SSChunk;
 
-int MemPoolInit(void *adr, uint64_t ch_size, uint64_t pl_size);
+int MemPoolInit(uint8_t *adr, uint64_t ch_size, uint64_t pl_size);
 
 SSChunk* MemPoolAlloc(void);
 
