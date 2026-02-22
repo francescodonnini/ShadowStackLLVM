@@ -10,9 +10,9 @@
 #include <sys/syscall.h>
 #include <unistd.h>
 
-#define SS_SIZE  (4096)
-#define SS_BASE  ((void*)0x700000000000)
-#define MEM_SIZE (64ULL * 1024 * 1024 * 1024)
+#define SS_SIZE  (1024 * 1024)
+#define SS_BASE  ((uint8_t*)0x7fffffffffff)
+#define MEM_SIZE ((1024 * 1024 * 1024) / 2)
 
 typedef int (*RealPThreadCreate)(pthread_t*, const pthread_attr_t*, void* (*)(void*), void*);
 
