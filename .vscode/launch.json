@@ -27,6 +27,11 @@
                     "description": "Allow optimization stepping",
                     "text": "set step-mode on",
                     "ignoreFailures": true
+                },
+                {
+                    "description": "Stop at the actual entry point",
+                    "text": "break _start",
+                    "ignoreFailures": false
                 }
             ]
         }

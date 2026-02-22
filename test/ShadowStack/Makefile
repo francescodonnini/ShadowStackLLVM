@@ -6,7 +6,7 @@ all:
     -print-changed \
     -S build/test.ll -o build/test_instrumented.ll
 	llc -O2 --x86-asm-syntax=intel build/test_instrumented.ll -o build/test_instrumented.S
-	clang -g build/test_instrumented.S -o build/test_instrumented.exe
+	clang -g build/test_instrumented.S /home/francesco/Documents/Università/TESI/ShadowStackLLVM/SSRuntime/relocate_stack.S -Wl,-e,relocate_stack -o build/test_instrumented.exe	
 
 run:
 	env LD_PRELOAD=/home/francesco/Documents/Università/TESI/ShadowStackLLVM/SSRuntime/build/libruntime.so ./build/test_instrumented.exe
