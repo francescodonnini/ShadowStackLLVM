@@ -14,6 +14,8 @@ private:
     void instrumentPreamble(Function &F);
     void instrumentEpilogue(Function &F);
     void instrumentRet(Function &F, ReturnInst &I);
+    void instrumentStores(Function &F);
+    void instrumentStore(Function &F, StoreInst &I);
 };
 }
 #endif

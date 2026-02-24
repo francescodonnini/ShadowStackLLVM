@@ -21,6 +21,7 @@ PreservedAnalyses SSFunctionPass::run(Function &F, FunctionAnalysisManager &FAM)
       errs() << "Instrumenting function " << F.getName() << "\n";
     }
 
+    instrumentStores(F);
     instrumentPreamble(F);
     instrumentEpilogue(F);
 
@@ -32,25 +33,21 @@ void SSFunctionPass::instrumentPreamble(Function &F) {
   IRBuilder<> Builder(&EntryBB, EntryBB.getFirstNonPHIIt());
 
   auto *M = F.getParent();
-  auto *Int64Ty = Builder.getInt64Ty();
-  auto *GsPtrTy = PointerType::get(Int64Ty, GS_ADDR_SPACE);
-  auto *Int64PtrTy = PointerType::getUnqual(Int64Ty);
+  auto *I64Ty = Builder.getInt64Ty();
+  auto *I64PtrTy = PointerType::getUnqual(I64Ty);
+  auto *GsI64PtrTy = PointerType::get(I64Ty, GS_ADDR_SPACE);
 
   auto *RetAdrIntr = Intrinsic::getOrInsertDeclaration(M, Intrinsic::returnaddress);
   auto *RetAdrPtr = Builder.CreateCall(RetAdrIntr, {Builder.getInt32(0)});
-  auto *RetAdrVal = Builder.CreatePtrToInt(RetAdrPtr, Int64Ty, "ret_adr_before");
+  auto *RetAdrVal = Builder.CreatePtrToInt(RetAdrPtr, I64Ty, "ret_adr_before");
 
-  // 2. Push the return address at the top of the shadow stack
-  // Get the address of the top of the shadow stack
-  // The address is stored as the first element of the shadow stack object
-  auto *SSOPtr = Builder.CreateIntToPtr(Builder.getInt64(0), GsPtrTy, "ss_obj_ptr");
-  auto *SSTopFieldPtr = Builder.CreateLoad(Int64PtrTy, SSOPtr);
-  auto *SSTopPtrPtr = Builder.CreateLoad(Int64PtrTy, SSTopFieldPtr);
+  auto *SSOPtr = Builder.CreateIntToPtr(Builder.getInt64(8), GsI64PtrTy, "ss_obj_ptr");
+  auto *SSTopI64 = Builder.CreateLoad(I64Ty, SSOPtr);
+  auto *SSTopPtr = Builder.CreateIntToPtr(SSTopI64, I64PtrTy);
 
-  Builder.CreateStore(RetAdrVal, SSTopPtrPtr);
+  Builder.CreateStore(RetAdrVal, SSTopPtr);
 
-  // 4. Advance the top of the shadow stack
-  auto *NewSSTopPtr = Builder.CreateGEP(Int64Ty, SSTopFieldPtr, Builder.getInt64(1), "ss_push");
+  auto *NewSSTopPtr = Builder.CreateGEP(I64Ty, SSTopPtr, Builder.getInt64(1), "ss_push");
   Builder.CreateStore(NewSSTopPtr, SSOPtr);
 }
 
@@ -71,22 +68,22 @@ void SSFunctionPass::instrumentRet(Function &F, ReturnInst &I) {
   IRBuilder<> Builder(&I);
 
   auto *M = F.getParent();
-  auto *Int64Ty = Builder.getInt64Ty();
-  auto *GsPtrTy = PointerType::get(Int64Ty, GS_ADDR_SPACE);
-  auto *Int64PtrTy = PointerType::get(Int64Ty, 0);
+  auto *I64Ty = Builder.getInt64Ty();
+  auto *I64PtrTy = PointerType::getUnqual(I64Ty);
+  auto *GsI64PtrTy = PointerType::get(I64Ty, GS_ADDR_SPACE);
 
   auto *AdrOfRetAdrIntr = Intrinsic::getOrInsertDeclaration(M, Intrinsic::addressofreturnaddress, { Builder.getPtrTy() });
   auto *AdrOfRetAdrPtr = Builder.CreateCall(AdrOfRetAdrIntr, {});
-  auto *RetAdrVal = Builder.CreateLoad(Int64Ty, AdrOfRetAdrPtr, true, "ret_adr_after");
+  auto *RetAdrVal = Builder.CreateLoad(I64Ty, AdrOfRetAdrPtr, true, "ret_adr_after");
 
   // 2. Pop the return address from the top of the shadow stack
   // Get the address of the top of the shadow stack
   // The address is stored as the first element of the shadow stack object
-  auto *SSOPtr = Builder.CreateIntToPtr(Builder.getInt64(0), GsPtrTy, "ss_obj_ptr");
-  auto *SSTopFieldPtr = Builder.CreateLoad(Int64PtrTy, SSOPtr);
-  auto *SSTopPtr = Builder.CreateLoad(Int64PtrTy, SSTopFieldPtr);
-  auto *SSCurPtr = Builder.CreateGEP(Int64Ty, SSTopPtr, Builder.getInt64(-1), "ss_curr_ptr");
-  auto *ShadowRetVal = Builder.CreateLoad(Int64Ty, SSCurPtr);
+  auto *SSOPtr = Builder.CreateIntToPtr(Builder.getInt64(8), GsI64PtrTy, "ss_obj_ptr");
+  auto *SSTopPtr = Builder.CreateLoad(I64PtrTy, SSOPtr);
+
+  auto *SSCurPtr = Builder.CreateGEP(I64Ty, SSTopPtr, Builder.getInt64(-1), "ss_curr_ptr");
+  auto *ShadowRetVal = Builder.CreateLoad(I64Ty, SSCurPtr);
   // Update the top of the shadow stack
   Builder.CreateStore(SSCurPtr, SSOPtr);
   
@@ -107,6 +104,32 @@ void SSFunctionPass::instrumentRet(Function &F, ReturnInst &I) {
   // Link CheckBB to FailBB + RetBB
   Builder.SetInsertPoint(CheckBB);
   Builder.CreateCondBr(Compare, FailBB, RetBB);
+}
+
+void SSFunctionPass::instrumentStores(Function &F) {
+  SmallVector<StoreInst*, 8> Stores;
+  for (auto &BB : F) {
+    for (auto &I : BB) {
+      if (auto *SI = dyn_cast<StoreInst>(&I)) {
+          Stores.push_back(SI);
+      }
+    }
+  }
+
+  for (auto SI : Stores) {
+    instrumentStore(F, *SI);
+  }
+}
+
+void SSFunctionPass::instrumentStore(Function &F, StoreInst &I) {
+  constexpr auto MASK = ~0x700000000000ULL;
+  auto *DstPtr = I.getPointerOperand();
+  
+  IRBuilder<> Builder(&I);
+  auto *DstI64 = Builder.CreatePtrToInt(DstPtr, Builder.getInt64Ty());
+  auto *MaskedInt = Builder.CreateAnd(DstI64, Builder.getInt64(MASK));
+  auto *MaskedPtr = Builder.CreateIntToPtr(MaskedInt, DstPtr->getType());
+  I.setOperand(I.getPointerOperandIndex(), MaskedPtr);
 }
 
 extern "C" ::llvm::PassPluginLibraryInfo LLVM_ATTRIBUTE_WEAK

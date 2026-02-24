@@ -24,7 +24,7 @@ static uint8_t *freearea_end;
 
 int MemPoolInit(uint8_t *adr, uint64_t ch_size, uint64_t pl_size) {
     pthread_mutex_init(&llock, NULL);
-    mem_pool = mmap(adr, pl_size, PROT_READ | PROT_WRITE, MAP_PRIVATE | MAP_ANONYMOUS | MAP_FIXED_NOREPLACE, -1, 0);
+    mem_pool = mmap(adr, pl_size, PROT_READ | PROT_WRITE, MAP_PRIVATE | MAP_ANONYMOUS | MAP_NORESERVE, -1, 0);
     if (mem_pool == MAP_FAILED) {
         perror("[ss-alloc] mmap");
         return -1;

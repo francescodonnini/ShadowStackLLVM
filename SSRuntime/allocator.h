@@ -4,8 +4,8 @@
 #include <stdint.h>
 
 typedef struct SSChunk {
-    uint64_t       *top;
     struct SSChunk *next;
+    uint64_t       *top;
     uint64_t        data[];
 } SSChunk;
 
