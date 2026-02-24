@@ -1,5 +1,6 @@
 #define _GNU_SOURCE
 #include "allocator.h"
+#include "mapping.h"
 #include <pthread.h>
 #include <stddef.h>
 #include <stdio.h>
@@ -12,7 +13,7 @@
 
 #define SS_SIZE  (1024 * 1024)
 #define SS_BASE  ((uint8_t*)0x7fffffffffff)
-#define MEM_SIZE ((1024 * 1024 * 1024) / 2)
+#define MEM_SIZE ((1024 * 1024 * 1024))
 
 typedef int (*RealPThreadCreate)(pthread_t*, const pthread_attr_t*, void* (*)(void*), void*);
 
@@ -30,7 +31,12 @@ static inline void get_chunk(SSChunk *chunk) {
 
 __attribute__((constructor))
 void SSInit(void) {
-    if (MemPoolInit(SS_BASE, SS_SIZE, MEM_SIZE) < 0) {
+    uint64_t lo, hi;
+    if (setup_memory(&lo, &hi, MEM_SIZE)) {
+        exit(EXIT_FAILURE);
+    }
+
+    if (MemPoolInit((uint8_t*)lo, SS_SIZE, MEM_SIZE) < 0) {
         exit(EXIT_FAILURE);
     }
 
