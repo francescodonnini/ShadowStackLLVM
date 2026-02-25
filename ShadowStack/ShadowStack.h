@@ -15,7 +15,7 @@ private:
     void instrumentEpilogue(Function &F);
     void instrumentRet(Function &F, ReturnInst &I);
     void instrumentStores(Function &F);
-    void instrumentStore(Function &F, StoreInst &I);
+    void instrumentStore(Function &F, StoreInst &I, Value *Mask);
 };
 }
 #endif

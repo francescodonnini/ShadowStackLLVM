@@ -6,8 +6,9 @@
 #include "llvm/IR/InstVisitor.h"
 #include "llvm/Passes/PassPlugin.h"
 #include "llvm/Passes/PassBuilder.h"
-#include "llvm/Support/raw_ostream.h"
 #include "llvm/Support/Debug.h"
+#include "llvm/Support/KnownBits.h"
+#include "llvm/Support/raw_ostream.h"
 
 #define DEBUG_TYPE "shadow-stack-opt"
 
@@ -116,24 +117,30 @@ void SSFunctionPass::instrumentStores(Function &F) {
     }
   }
 
+  auto &EntryBB = F.getEntryBlock();
+  IRBuilder<> Builder(&EntryBB, EntryBB.getFirstNonPHIIt());
+  auto Mask = Builder.getInt64(0x6FFFFFFFFFFFULL);
+
   for (auto SI : Stores) {
-    instrumentStore(F, *SI);
+    instrumentStore(F, *SI, Mask);
   }
 }
 
-void SSFunctionPass::instrumentStore(Function &F, StoreInst &I) {
+void SSFunctionPass::instrumentStore(Function &F, StoreInst &I, Value *MaskVal) {
+  auto *DstPtr = I.getPointerOperand();
+  auto *RawPtr = I.getPointerOperand()->stripPointerCasts();
+  if (isa<AllocaInst>(RawPtr)) {
+    return;
+  }
+
   IRBuilder<> Builder(&I);
-  
   auto *M = F.getParent();
   auto *I64Ty = Builder.getInt64Ty();
   auto *I64PtrTy = PointerType::getUnqual(I64Ty);
   auto *GsI64PtrTy = PointerType::get(I64Ty, GS_ADDR_SPACE);
 
-  auto *MaskPtr = Builder.CreateIntToPtr(Builder.getInt64(16), GsI64PtrTy, "mask_ptr");
-  auto *Mask = Builder.CreateLoad(I64Ty, MaskPtr);
-  auto *DstPtr = I.getPointerOperand();
   auto *DstI64 = Builder.CreatePtrToInt(DstPtr, Builder.getInt64Ty());
-  auto *MaskedInt = Builder.CreateAnd(DstI64, Mask, "masked_adr");
+  auto *MaskedInt = Builder.CreateAnd(DstI64, MaskVal, "masked_adr");
   auto *MaskedPtr = Builder.CreateIntToPtr(MaskedInt, DstPtr->getType());
   I.setOperand(I.getPointerOperandIndex(), MaskedPtr);
 }
