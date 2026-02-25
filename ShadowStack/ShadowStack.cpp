@@ -122,12 +122,18 @@ void SSFunctionPass::instrumentStores(Function &F) {
 }
 
 void SSFunctionPass::instrumentStore(Function &F, StoreInst &I) {
-  constexpr auto MASK = ~0x700000000000ULL;
-  auto *DstPtr = I.getPointerOperand();
-  
   IRBuilder<> Builder(&I);
+  
+  auto *M = F.getParent();
+  auto *I64Ty = Builder.getInt64Ty();
+  auto *I64PtrTy = PointerType::getUnqual(I64Ty);
+  auto *GsI64PtrTy = PointerType::get(I64Ty, GS_ADDR_SPACE);
+
+  auto *MaskPtr = Builder.CreateIntToPtr(Builder.getInt64(16), GsI64PtrTy, "mask_ptr");
+  auto *Mask = Builder.CreateLoad(I64Ty, MaskPtr);
+  auto *DstPtr = I.getPointerOperand();
   auto *DstI64 = Builder.CreatePtrToInt(DstPtr, Builder.getInt64Ty());
-  auto *MaskedInt = Builder.CreateAnd(DstI64, Builder.getInt64(MASK));
+  auto *MaskedInt = Builder.CreateAnd(DstI64, Mask, "masked_adr");
   auto *MaskedPtr = Builder.CreateIntToPtr(MaskedInt, DstPtr->getType());
   I.setOperand(I.getPointerOperandIndex(), MaskedPtr);
 }

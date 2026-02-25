@@ -20,6 +20,19 @@ static int insert_ma(MemArea **list, uint64_t lo, uint64_t hi) {
     return 0;
 }
 
+static int reserve_all(MemArea *list, uint64_t target_lo, uint64_t target_hi) {
+    for (MemArea *p = list; p; p = p->next) {
+        if (p->lo >= target_hi || p->hi <= target_lo) {
+            void *addr = mmap((void*)p->lo, p->hi - p->lo, PROT_NONE, MAP_PRIVATE | MAP_ANONYMOUS | MAP_NORESERVE, -1, 0);
+            if (addr == MAP_FAILED) {
+                perror("reserve_all");
+                return -1;
+            }
+        }
+    }
+    return 0;
+}
+
 int setup_memory(uint64_t *lo_out, uint64_t *hi_out, uint64_t min) {
     FILE* fp = fopen("/proc/self/maps", "r");
     if (!fp) {
@@ -38,7 +51,7 @@ int setup_memory(uint64_t *lo_out, uint64_t *hi_out, uint64_t min) {
     uint64_t prev_hi = BASE;
     MemArea *list = NULL;
     char *p;
-    while ((p = fgets(line, bufsz - 1, fp))){
+    while ((p = fgets(line, bufsz - 1, fp))) {
         char *endp;
         uint64_t lo = strtoull(p, &endp, 16);
         if (!lo || *endp != '-') goto out2;
@@ -75,6 +88,10 @@ int setup_memory(uint64_t *lo_out, uint64_t *hi_out, uint64_t min) {
         }
         target_lo &= ~15;
         target_hi &= ~15;
+        if (reserve_all(list, target_lo, target_hi)) {
+            found = false;
+            goto out2;
+        }
         *lo_out = target_lo;
         *hi_out = target_hi;
     }
@@ -94,4 +111,5 @@ out:
 int main() {
     uint64_t lo, hi;
     setup_memory(&lo, &hi, 4096);
+    printf("Selected area: %lx - %lx\n", lo, hi);
 }

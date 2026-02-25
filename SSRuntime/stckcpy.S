@@ -1,4 +1,4 @@
-.equ STACK_SIZE, 0X22000
+.equ STACK_SIZE, 0x800000
 .equ ADR_HINT, 0x600000000000
 .global relocate_stack
 .extern _start
@@ -157,14 +157,22 @@ _patch_envp_exit:
 _patch_auxv:
     mov (%r10), %r11
     test %r11, %r11
-    jz _patch_auxv_exit
+    jz _patch_auxv_exit # exit if AT_NULL
 
+    cmp $7, %r9 # AT_BASE
+    je _do_patch_auxp
+    cmp $15, %r9 # AT_PLATFORM
+    je _do_patch_auxp
+    cmp $25, %r9 # AT_RANDOM
+    je _do_patch_auxp
+    cmp $31, %r9 # AT_EXECFN
+    je _do_patch_auxp
+    jmp _patch_inc_auxv
+
+_do_patch_auxp:
     mov 8(%r10), %r11
-    cmp %r11, %rsp
-    jl _patch_inc_auxv
-
     add %r9, %r11
-    mov %r11, (%r10)
+    mov %r11, 8(%r10)
 
 _patch_inc_auxv:
     lea 16(%r10), %r10
@@ -172,7 +180,5 @@ _patch_inc_auxv:
 
 _patch_auxv_exit:
     mov %rax, %rsp
-
     mov %r12, %rdx
-
     jmp _start
