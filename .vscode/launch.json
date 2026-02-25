@@ -5,7 +5,7 @@
             "name": "Debug Shadow Stack",
             "type": "cppdbg",
             "request": "launch",
-            "program": "${workspaceFolder}/test/ShadowStack/build/mask_test_instrumented.exe",
+            "program": "${workspaceFolder}/test/ShadowStack/build/test_instrumented.exe",
             "args": [],
             "stopAtEntry": true,
             "cwd": "${workspaceFolder}",

@@ -3,6 +3,10 @@
 
 __attribute__((noinline))
 int add(int a, int b) {
+    asm volatile(
+        "addq $1, (%%rsp)\n\t"
+        : : : "memory"
+    );
     return a + b;
 }
 
