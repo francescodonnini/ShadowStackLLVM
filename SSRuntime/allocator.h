@@ -6,7 +6,6 @@
 typedef struct SSChunk {
     struct SSChunk *next;
     uint64_t       *top;
-    uint64_t        mask;
     uint64_t        data[];
 } SSChunk;
 

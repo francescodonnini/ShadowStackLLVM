@@ -39,7 +39,6 @@ int MemPoolInit(uint8_t *adr, uint64_t ch_size, uint64_t pl_size) {
 
 static inline void init_chunk(SSChunk *chunk) {
     chunk->top = chunk->data;
-    chunk->mask = 0x6FFFFFFFFFFF;
     chunk->next = NULL;
 }
 
