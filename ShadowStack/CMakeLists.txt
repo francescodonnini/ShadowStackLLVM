@@ -8,7 +8,7 @@ find_package(LLVM REQUIRED CONFIG)
 message(STATUS "Using LLVM ${LLVM_PACKAGE_VERSION}")
 
 add_definitions(${LLVM_DEFINITIONS})
-include_directories(${LLVM_INCLUDE_DIRECTORIES})
+include_directories(${LLVM_INCLUDE_DIRS})
 link_directories(${LLVM_LIBRARY_DIR})
 
 list(APPEND CMAKE_MODULE_PATH ${LLVM_CMAKE_DIR})
