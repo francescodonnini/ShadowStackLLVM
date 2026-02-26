@@ -1,5 +1,8 @@
 #ifndef STRICT_OPT_H
 #define STRICT_OPT_H
+#include "llvm/Analysis/ScalarEvolution.h"
+#include "llvm/IR/ConstantRange.h"
+#include "llvm/IR/Dominators.h"
 #include "llvm/IR/Instructions.h"
 #include "llvm/IR/PassManager.h"
 
@@ -7,15 +10,24 @@ namespace llvm {
 class Function;
 
 struct SSFunctionPass : public PassInfoMixin<SSFunctionPass> {
+    SSFunctionPass(bool instrumentFun = true, bool instrumentStore = true)
+        :_instrumentFun(instrumentFun), _instrumentStore(instrumentStore) {
+            errs() << "[ss] Function Instrumentation: " << (instrumentFun ? "ON" : "OFF") << ", Store Instrumentation: " << (instrumentStore ? "ON" : "OFF") << "\n";
+        }
+
     PreservedAnalyses run(Function &F, FunctionAnalysisManager &FAM);
 private:
     constexpr static auto GS_ADDR_SPACE = 256;
+    constexpr static auto MASK = 0x6FFFFFFFFFFFULL;
+
+    bool _instrumentFun;
+    bool _instrumentStore;
 
     void instrumentPreamble(Function &F);
     void instrumentEpilogue(Function &F);
     void instrumentRet(Function &F, ReturnInst &I);
-    void instrumentStores(Function &F);
-    void instrumentStore(Function &F, StoreInst &I, Value *Mask);
+    void instrumentStores(Function &F, DominatorTree &DT, ScalarEvolution &SE);
+    void instrumentStore(Function &F, StoreInst &I, uint64_t Mask, Value *MaskVal, DominatorTree &DT, ScalarEvolution &SE, DenseMap<Value*, Value*> &MaskedPtrs);
 };
 }
 #endif

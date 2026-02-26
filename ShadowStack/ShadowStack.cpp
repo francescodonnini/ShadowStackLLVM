@@ -1,9 +1,12 @@
 #include "ShadowStack.h"
+#include "llvm/ADT/Statistic.h"
 #include "llvm/ADT/STLExtras.h"
 #include "llvm/Analysis/AliasAnalysis.h"
+#include "llvm/Analysis/ValueTracking.h"
 #include "llvm/IR/Attributes.h"
 #include "llvm/IR/Function.h"
 #include "llvm/IR/InstVisitor.h"
+#include "llvm/IR/IRBuilder.h"
 #include "llvm/Passes/PassPlugin.h"
 #include "llvm/Passes/PassBuilder.h"
 #include "llvm/Support/Debug.h"
@@ -14,17 +17,28 @@
 
 using namespace llvm;
 
+STATISTIC(NumStoresSeen, "Total number of stores evaluated");
+STATISTIC(NumSkippedAlloca, "Number of masks skipped (Stack Object)");
+STATISTIC(NumSkippedKnownBits, "Number of masks skipped (Known Bits)");
+STATISTIC(NumSkippedSCEV, "Number of masks skipped (Scalar Evolution)");
+STATISTIC(NumSkippedDomTree, "Number of masks skipped (Dominator Tree)");
+STATISTIC(NumStoresInstrumented, "Number of masks actually injected");
+
 PreservedAnalyses SSFunctionPass::run(Function &F, FunctionAnalysisManager &FAM) {
     if (F.isDeclaration()) {
-      errs() << "Skipping function " << F.getName() << "\n";
       return PreservedAnalyses::all();
-    } else {
-      errs() << "Instrumenting function " << F.getName() << "\n";
     }
 
-    instrumentStores(F);
-    instrumentPreamble(F);
-    instrumentEpilogue(F);
+    if (_instrumentStore) {
+      auto &DT = FAM.getResult<DominatorTreeAnalysis>(F);
+      auto &SE = FAM.getResult<ScalarEvolutionAnalysis>(F);
+      instrumentStores(F, DT, SE);
+    }
+
+    if (_instrumentFun) {
+      instrumentPreamble(F);
+      instrumentEpilogue(F);
+    }
 
     return PreservedAnalyses::none();
 }
@@ -107,7 +121,7 @@ void SSFunctionPass::instrumentRet(Function &F, ReturnInst &I) {
   Builder.CreateCondBr(Compare, FailBB, RetBB);
 }
 
-void SSFunctionPass::instrumentStores(Function &F) {
+void SSFunctionPass::instrumentStores(Function &F, DominatorTree &DT, ScalarEvolution &SE) {  
   SmallVector<StoreInst*, 8> Stores;
   for (auto &BB : F) {
     for (auto &I : BB) {
@@ -119,18 +133,56 @@ void SSFunctionPass::instrumentStores(Function &F) {
 
   auto &EntryBB = F.getEntryBlock();
   IRBuilder<> Builder(&EntryBB, EntryBB.getFirstNonPHIIt());
-  auto Mask = Builder.getInt64(0x6FFFFFFFFFFFULL);
+  auto Mask = Builder.getInt64(MASK);
 
+  DenseMap<Value*, Value*> MaskedPtrs;
   for (auto SI : Stores) {
-    instrumentStore(F, *SI, Mask);
+    instrumentStore(F, *SI, MASK, Mask, DT, SE, MaskedPtrs);
   }
 }
 
-void SSFunctionPass::instrumentStore(Function &F, StoreInst &I, Value *MaskVal) {
+void SSFunctionPass::instrumentStore(
+  Function &F,
+  StoreInst &I,
+  uint64_t Mask,
+  Value *MaskVal,
+  DominatorTree &DT,
+  ScalarEvolution &SE,
+  DenseMap<Value*, Value*> &MaskedPtrs) {
+  NumStoresSeen++;
+
   auto *DstPtr = I.getPointerOperand();
-  auto *RawPtr = I.getPointerOperand()->stripPointerCasts();
+  auto *RawPtr = getUnderlyingObject(DstPtr);
   if (isa<AllocaInst>(RawPtr)) {
+    NumSkippedAlloca++;
     return;
+  }
+
+  const auto &DL = F.getParent()->getDataLayout();
+  auto Known = computeKnownBits(DstPtr, DL);
+  auto BitsToClear = ~Mask;
+  if ((Known.Zero.getZExtValue() & BitsToClear) == BitsToClear) {
+    NumSkippedKnownBits++;
+    return;
+  }
+
+  const auto &SCEV = SE.getSCEV(DstPtr);
+  auto PtrRange = SE.getUnsignedRange(SCEV);
+  auto MaxValue = PtrRange.getUnsignedMax();
+  APInt APMask(MaxValue.getBitWidth(), Mask);
+  if ((MaxValue & ~APMask).isZero()) {
+    NumSkippedSCEV++;
+    return;
+  }
+
+  if (MaskedPtrs.count(DstPtr)) {
+    auto *PrevMaskedPtr = MaskedPtrs[DstPtr];
+    auto *PrevInst = dyn_cast<Instruction>(PrevMaskedPtr);
+    if (!PrevInst ||DT.dominates(PrevInst, &I)) {
+      I.setOperand(I.getPointerOperandIndex(), PrevMaskedPtr);
+      NumSkippedDomTree++;
+      return;
+    }
   }
 
   IRBuilder<> Builder(&I);
@@ -143,6 +195,8 @@ void SSFunctionPass::instrumentStore(Function &F, StoreInst &I, Value *MaskVal) 
   auto *MaskedInt = Builder.CreateAnd(DstI64, MaskVal, "masked_adr");
   auto *MaskedPtr = Builder.CreateIntToPtr(MaskedInt, DstPtr->getType());
   I.setOperand(I.getPointerOperandIndex(), MaskedPtr);
+  MaskedPtrs[DstPtr] = cast<Instruction>(MaskedPtr);
+  NumStoresInstrumented++;
 }
 
 extern "C" ::llvm::PassPluginLibraryInfo LLVM_ATTRIBUTE_WEAK
@@ -155,7 +209,6 @@ llvmGetPassPluginInfo() {
       PB.registerPipelineStartEPCallback(
         [](ModulePassManager &MPM, OptimizationLevel OL) {
           MPM.addPass(createModuleToFunctionPassAdaptor(SSFunctionPass()));
-          errs() << "[ss] ShadowStack registered successfully\n";
         });
 
       PB.registerPipelineParsingCallback(
