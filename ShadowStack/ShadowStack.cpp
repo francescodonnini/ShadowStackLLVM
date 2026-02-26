@@ -29,13 +29,27 @@ PreservedAnalyses SSFunctionPass::run(Function &F, FunctionAnalysisManager &FAM)
       return PreservedAnalyses::all();
     }
 
+    auto isLeaf = true;
+    for (auto &BB : F) {
+      for (auto &I : BB) {
+        if (auto *CI = dyn_cast<CallInst>(&I)) {
+          if (!CI->getIntrinsicID()) {
+            isLeaf = false;
+            break;
+          }
+        }
+      }
+      if (!isLeaf) break;
+    }
+
+
     if (_instrumentStore) {
       auto &DT = FAM.getResult<DominatorTreeAnalysis>(F);
       auto &SE = FAM.getResult<ScalarEvolutionAnalysis>(F);
       instrumentStores(F, DT, SE);
     }
 
-    if (_instrumentFun) {
+    if (_instrumentFun && !isLeaf) {
       instrumentPreamble(F);
       instrumentEpilogue(F);
     }
@@ -150,40 +164,21 @@ void SSFunctionPass::instrumentStore(
   ScalarEvolution &SE,
   DenseMap<Value*, Value*> &MaskedPtrs) {
   NumStoresSeen++;
+#if defined(OPT_ALL) || defined(ALLOCA_OPT)
+  if (allocaOpt(I)) return;
+#endif
 
-  auto *DstPtr = I.getPointerOperand();
-  auto *RawPtr = getUnderlyingObject(DstPtr);
-  if (isa<AllocaInst>(RawPtr)) {
-    NumSkippedAlloca++;
-    return;
-  }
+#if defined(OPT_ALL) || defined(KNOWNBITS_OPT)
+  if (knownBitsOpt(F, I, Mask, DT, SE)) return;
+#endif
 
-  const auto &DL = F.getParent()->getDataLayout();
-  auto Known = computeKnownBits(DstPtr, DL);
-  auto BitsToClear = ~Mask;
-  if ((Known.Zero.getZExtValue() & BitsToClear) == BitsToClear) {
-    NumSkippedKnownBits++;
-    return;
-  }
+#if defined(OPT_ALL) || defined(SCEV_OPT)
+  if (scalarEvolutionOpt(I, Mask, DT, SE)) return;
+#endif
 
-  const auto &SCEV = SE.getSCEV(DstPtr);
-  auto PtrRange = SE.getUnsignedRange(SCEV);
-  auto MaxValue = PtrRange.getUnsignedMax();
-  APInt APMask(MaxValue.getBitWidth(), Mask);
-  if ((MaxValue & ~APMask).isZero()) {
-    NumSkippedSCEV++;
-    return;
-  }
-
-  if (MaskedPtrs.count(DstPtr)) {
-    auto *PrevMaskedPtr = MaskedPtrs[DstPtr];
-    auto *PrevInst = dyn_cast<Instruction>(PrevMaskedPtr);
-    if (!PrevInst ||DT.dominates(PrevInst, &I)) {
-      I.setOperand(I.getPointerOperandIndex(), PrevMaskedPtr);
-      NumSkippedDomTree++;
-      return;
-    }
-  }
+#if defined(OPT_ALL) || defined(DOMTREE_OPT)
+  if (domTreeOpt(I, DT, MaskedPtrs)) return;
+#endif
 
   IRBuilder<> Builder(&I);
   auto *M = F.getParent();
@@ -191,12 +186,65 @@ void SSFunctionPass::instrumentStore(
   auto *I64PtrTy = PointerType::getUnqual(I64Ty);
   auto *GsI64PtrTy = PointerType::get(I64Ty, GS_ADDR_SPACE);
 
+  auto *DstPtr = I.getPointerOperand();
   auto *DstI64 = Builder.CreatePtrToInt(DstPtr, Builder.getInt64Ty());
   auto *MaskedInt = Builder.CreateAnd(DstI64, MaskVal, "masked_adr");
   auto *MaskedPtr = Builder.CreateIntToPtr(MaskedInt, DstPtr->getType());
+
   I.setOperand(I.getPointerOperandIndex(), MaskedPtr);
-  MaskedPtrs[DstPtr] = cast<Instruction>(MaskedPtr);
+  
+  MaskedPtrs[DstPtr] = MaskedPtr;
+  
   NumStoresInstrumented++;
+}
+
+bool SSFunctionPass::allocaOpt(StoreInst &I) {
+  auto *DstPtr = I.getPointerOperand();
+  auto *RawPtr = getUnderlyingObject(DstPtr);
+  if (isa<AllocaInst>(RawPtr)) {
+    NumSkippedAlloca++;
+    return true;
+  }
+  return false;
+}
+
+bool SSFunctionPass::knownBitsOpt(Function &F, StoreInst&I, uint64_t Mask, DominatorTree &DT, ScalarEvolution &SE) {
+  auto *DstPtr = I.getPointerOperand();
+  const auto &DL = F.getParent()->getDataLayout();
+  auto Known = computeKnownBits(DstPtr, DL);
+  auto BitsToClear = ~Mask;
+  if ((Known.Zero.getZExtValue() & BitsToClear) == BitsToClear) {
+    NumSkippedKnownBits++;
+    return true;
+  }
+  return false;
+}
+
+bool SSFunctionPass::scalarEvolutionOpt(StoreInst &I, uint64_t Mask, DominatorTree &DT, ScalarEvolution &SE) {
+  auto *DstPtr = I.getPointerOperand();
+  const auto &SCEV = SE.getSCEV(DstPtr);
+  auto PtrRange = SE.getUnsignedRange(SCEV);
+  auto MaxValue = PtrRange.getUnsignedMax();
+  APInt APMask(MaxValue.getBitWidth(), Mask);
+  if ((MaxValue & ~APMask).isZero()) {
+    NumSkippedSCEV++;
+    return true;
+  }
+  return false;
+}
+
+bool SSFunctionPass::domTreeOpt(StoreInst &I, DominatorTree &DT, DenseMap<Value*, Value*> &MaskedPtrs) {
+  auto *DstPtr = I.getPointerOperand();
+  if (MaskedPtrs.count(DstPtr)) {
+    auto *PrevMaskedPtr = MaskedPtrs[DstPtr];
+    auto *PrevInst = dyn_cast<Instruction>(PrevMaskedPtr);
+    if (!PrevInst ||DT.dominates(PrevInst, &I)) {
+      I.setOperand(I.getPointerOperandIndex(), PrevMaskedPtr);
+      NumSkippedDomTree++;
+      return true;
+    }
+  }
+  return false;
 }
 
 extern "C" ::llvm::PassPluginLibraryInfo LLVM_ATTRIBUTE_WEAK
@@ -204,8 +252,6 @@ llvmGetPassPluginInfo() {
   return {
     LLVM_PLUGIN_API_VERSION, "ShadowStack", "v0.1",
     [](PassBuilder &PB) {
-      // Run Pass before other optimizations when the optimization
-      // level is at least -O2
       PB.registerPipelineStartEPCallback(
         [](ModulePassManager &MPM, OptimizationLevel OL) {
           MPM.addPass(createModuleToFunctionPassAdaptor(SSFunctionPass()));

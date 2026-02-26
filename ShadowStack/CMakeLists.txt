@@ -7,6 +7,11 @@ find_package(LLVM REQUIRED CONFIG)
 
 message(STATUS "Using LLVM ${LLVM_PACKAGE_VERSION}")
 
+option(OPTS_ALL "Enable all optimizations" OFF)
+if(OPTS_ALL)
+    add_definitions(-DOPT_ALL)
+endif()
+
 add_definitions(${LLVM_DEFINITIONS})
 include_directories(${LLVM_INCLUDE_DIRS})
 link_directories(${LLVM_LIBRARY_DIR})
