@@ -28,7 +28,6 @@ private:
     void instrumentRet(Function &F, ReturnInst &I);
     void instrumentStores(Function &F, DominatorTree &DT, ScalarEvolution &SE);
     void instrumentStore(Function &F, StoreInst &I, uint64_t Mask, Value *MaskVal, DominatorTree &DT, ScalarEvolution &SE, DenseMap<Value*, Value*> &MaskedPtrs);
-    bool allocaOpt(StoreInst &I);
     bool knownBitsOpt(Function &F, StoreInst &I, uint64_t Mask, DominatorTree &DT, ScalarEvolution &SE);
     bool scalarEvolutionOpt(StoreInst &I, uint64_t Mask, DominatorTree &DT, ScalarEvolution &SE);
     bool domTreeOpt(StoreInst &I, DominatorTree &DT, DenseMap<Value*, Value*> &MaskedPtrs);

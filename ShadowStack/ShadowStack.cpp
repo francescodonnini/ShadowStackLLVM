@@ -18,7 +18,6 @@
 using namespace llvm;
 
 STATISTIC(NumStoresSeen, "Total number of stores evaluated");
-STATISTIC(NumSkippedAlloca, "Number of masks skipped (Stack Object)");
 STATISTIC(NumSkippedKnownBits, "Number of masks skipped (Known Bits)");
 STATISTIC(NumSkippedSCEV, "Number of masks skipped (Scalar Evolution)");
 STATISTIC(NumSkippedDomTree, "Number of masks skipped (Dominator Tree)");
@@ -164,10 +163,6 @@ void SSFunctionPass::instrumentStore(
   ScalarEvolution &SE,
   DenseMap<Value*, Value*> &MaskedPtrs) {
   NumStoresSeen++;
-#if defined(OPT_ALL) || defined(ALLOCA_OPT)
-  if (allocaOpt(I)) return;
-#endif
-
 #if defined(OPT_ALL) || defined(KNOWNBITS_OPT)
   if (knownBitsOpt(F, I, Mask, DT, SE)) return;
 #endif
@@ -196,16 +191,6 @@ void SSFunctionPass::instrumentStore(
   MaskedPtrs[DstPtr] = MaskedPtr;
   
   NumStoresInstrumented++;
-}
-
-bool SSFunctionPass::allocaOpt(StoreInst &I) {
-  auto *DstPtr = I.getPointerOperand();
-  auto *RawPtr = getUnderlyingObject(DstPtr);
-  if (isa<AllocaInst>(RawPtr)) {
-    NumSkippedAlloca++;
-    return true;
-  }
-  return false;
 }
 
 bool SSFunctionPass::knownBitsOpt(Function &F, StoreInst&I, uint64_t Mask, DominatorTree &DT, ScalarEvolution &SE) {
