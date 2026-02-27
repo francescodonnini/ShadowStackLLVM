@@ -74,10 +74,13 @@ void SSFunctionPass::instrumentPreamble(Function &F) {
   auto *SSTopI64 = Builder.CreateLoad(I64Ty, SSOPtr);
   auto *SSTopPtr = Builder.CreateIntToPtr(SSTopI64, I64PtrTy);
 
-  Builder.CreateStore(RetAdrVal, SSTopPtr);
+  auto *StoreRetAdr = Builder.CreateStore(RetAdrVal, SSTopPtr);
 
   auto *NewSSTopPtr = Builder.CreateGEP(I64Ty, SSTopPtr, Builder.getInt64(1), "ss_push");
-  Builder.CreateStore(NewSSTopPtr, SSOPtr);
+  auto *StoreTop = Builder.CreateStore(NewSSTopPtr, SSOPtr);
+  auto *MD = MDNode::get(F.getContext(), std::nullopt);
+  StoreRetAdr->setMetadata(MD_STORE_TAG, MD);
+  StoreTop->setMetadata(MD_STORE_TAG, MD);
 }
 
 void SSFunctionPass::instrumentEpilogue(Function &F) {
@@ -140,7 +143,9 @@ void SSFunctionPass::instrumentStores(Function &F, DominatorTree &DT, ScalarEvol
   for (auto &BB : F) {
     for (auto &I : BB) {
       if (auto *SI = dyn_cast<StoreInst>(&I)) {
+        if (!SI->getMetadata("m-ignore")) {
           Stores.push_back(SI);
+        }
       }
     }
   }

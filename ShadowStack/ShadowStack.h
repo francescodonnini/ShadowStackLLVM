@@ -19,6 +19,7 @@ struct SSFunctionPass : public PassInfoMixin<SSFunctionPass> {
 private:
     constexpr static auto GS_ADDR_SPACE = 256;
     constexpr static auto MASK = 0x6FFFFFFFFFFFULL;
+    constexpr static auto MD_STORE_TAG = "ss-store";
 
     bool _instrumentFun;
     bool _instrumentStore;
