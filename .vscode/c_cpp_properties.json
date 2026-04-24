@@ -1,0 +1,20 @@
+{
+    "configurations": [
+        {
+            "name": "Linux",
+            "includePath": [
+                "${workspaceFolder}/**",
+                "/home/francesco/Documents/Università/TESI/llvm-project/llvm/include",
+                "/home/francesco/Documents/Università/TESI/llvm-project/build/include",
+                "/home/francesco/Documents/Università/TESI/llvm-project/build/lib/Target",
+                "/home/francesco/Documents/Università/TESI/llvm-project/llvm/lib/Target/X86",
+                "/home/francesco/Documents/Università/TESI/llvm-project/build/lib/Target/X86"
+            ],
+            "compilerPath": "/usr/bin/clang++",
+            "cStandard": "c17",
+            "cppStandard": "c++17",
+            "intelliSenseMode": "linux-clang-x64"
+        }
+    ],
+    "version": 4
+}

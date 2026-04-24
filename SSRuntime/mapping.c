@@ -23,7 +23,7 @@ static int insert_ma(MemArea **list, uint64_t lo, uint64_t hi) {
 static int reserve_all(MemArea *list, uint64_t target_lo, uint64_t target_hi) {
     for (MemArea *p = list; p; p = p->next) {
         if (p->lo >= target_hi || p->hi <= target_lo) {
-            void *addr = mmap((void*)p->lo, p->hi - p->lo, PROT_NONE, MAP_PRIVATE | MAP_ANONYMOUS | MAP_NORESERVE, -1, 0);
+            void *addr = mmap((void*)p->lo, p->hi - p->lo, PROT_NONE, MAP_PRIVATE | MAP_ANONYMOUS | MAP_NORESERVE | MAP_FIXED, -1, 0);
             if (addr == MAP_FAILED) {
                 perror("reserve_all");
                 return -1;

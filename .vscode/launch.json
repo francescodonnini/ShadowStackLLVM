@@ -5,41 +5,7 @@
             "name": "Debug Shadow Stack",
             "type": "cppdbg",
             "request": "launch",
-            "program": "${workspaceFolder}/test/ShadowStack/build/test_instrumented.exe",
-            "args": [],
-            "stopAtEntry": true,
-            "cwd": "${workspaceFolder}",
-            "environment": [
-                {
-                    "name": "LD_PRELOAD",
-                    "value": "${workspaceFolder}/SSRuntime/build/libruntime.so"
-                }
-            ],
-            "externalConsole": false,
-            "MIMode": "gdb",
-            "setupCommands": [
-                {
-                    "description": "Enable pretty-printing for gdb",
-                    "text": "-enable-pretty-printing",
-                    "ignoreFailures": true
-                },
-                {
-                    "description": "Allow optimization stepping",
-                    "text": "set step-mode on",
-                    "ignoreFailures": true
-                },
-                {
-                    "description": "Stop at the actual entry point",
-                    "text": "break _start",
-                    "ignoreFailures": false
-                }
-            ]
-        },
-        {
-            "name": "Debug SQLite Speed Test",
-            "type": "cppdbg",
-            "request": "launch",
-            "program": "${workspaceFolder}/test/sqlite-amalgamation-3510200/build/speedtest_instrumented.exe",
+            "program": "${workspaceFolder}/test/snippets/build/main/main.exe",
             "args": [],
             "stopAtEntry": true,
             "cwd": "${workspaceFolder}",
