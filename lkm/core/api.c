@@ -70,16 +70,17 @@ static pgd_t *get_current_user_pgd(void) {
     return (pgd_t *)((unsigned long)mm->pgd | PAGE_SIZE);
 }
 
-int map_shadow_stack(unsigned long vaddr) {
+struct ss_chunk* map_shadow_stack(unsigned long vaddr) {
     pgd_t *user_pgd = get_current_user_pgd();
     if (!user_pgd) {
-        return -EINVAL;
+        return ERR_PTR(-EINVAL);
     }
 
-    void *mem = vzalloc(SHADOW_SIZE);
+    struct ss_chunk *mem = vzalloc(SHADOW_SIZE);
     if (!mem) {
-        return -ENOMEM;
+        return ERR_PTR(-ENOMEM);
     }
+    mem->top = mem->data;
 
     for (unsigned long offset = 0; offset < SHADOW_SIZE; offset += PAGE_SIZE) {
         struct page *page = vmalloc_to_page(mem + offset);
@@ -87,7 +88,7 @@ int map_shadow_stack(unsigned long vaddr) {
         int err = map_page(user_pgd, vaddr + offset, phy);
         if (err) {
             vfree(mem);
-            return err;
+            return ERR_PTR(err);
         }
     }
     
@@ -103,8 +104,7 @@ int map_shadow_stack(unsigned long vaddr) {
         mutex_unlock(&sa_mutex);
     }
 
-
-    return 0;
+    return mem;
 }
 
 static void unmap_shadow_pt(pgd_t *user_pgd, unsigned long vaddr) {

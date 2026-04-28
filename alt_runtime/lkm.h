@@ -1,5 +1,6 @@
 #ifndef LKM_IOCTL_H
 #define LKM_IOCTL_H
+#include <stdint.h>
 #include <sys/ioctl.h>
 
 #define IOCTL_SHADOW_MAGIC 0xca
@@ -10,8 +11,17 @@ enum {
     IOCTL_SHADOW_MAX_NR
 };
 
+struct ss_chunk {
+    struct ss_chunk *padding;
+    uint64_t        *top;
+}
+
 struct ioctl_params {
-    unsigned long vaddr;
-    long          error;
+    uint64_t        vaddr;
+    struct ss_chunk chunk; 
+    long            error;
 };
+
+struct ss_chunk* MemPoolAlloc(void);
+
 #endif

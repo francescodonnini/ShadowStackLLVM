@@ -1,6 +1,7 @@
 #ifndef LKM_IOCTL_H
 #define LKM_IOCTL_H
 #include <asm/ioctl.h>
+#include <linux/types.h>
 
 #define IOCTL_SHADOW_MAGIC 0xca
 #define IOCTL_SHADOW_REQ   _IOWR(IOCTL_SHADOW_MAGIC, IOCTL_SHADOW_REQ_NO, struct ioctl_params)
@@ -11,7 +12,8 @@ enum {
 };
 
 struct ioctl_params {
-    unsigned long vaddr;
-    long          error;
+    uint64_t vaddr;
+    uint64_t top; 
+    long     error;
 };
 #endif

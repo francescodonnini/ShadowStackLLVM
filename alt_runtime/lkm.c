@@ -1,10 +1,10 @@
 #include "lkm.h"
 
-long request(unsigned long vaddr) {
+struct ss_chunk* shalloc(unsigned long vaddr) {
     int fd = open("/dev/shadow_stack", O_RDWR);
     if (fd < 0) {
         perror("open");
-        return -1;
+        return NULL;
     }
 
     struct ioctl_params req;
@@ -18,5 +18,5 @@ long request(unsigned long vaddr) {
     }
 
     close(fd);
-    return err;
+    return req.;
 }

@@ -1,5 +1,6 @@
-#include "chrdev.h"
 #include "api.h"
+#include "chrdev.h"
+#include "chrdev_ioctl.h"
 #include "pr_format.h"
 #include <asm/errno.h>
 #include <linux/printk.h>
@@ -34,12 +35,22 @@ long chrdev_ioctl(struct file *file, unsigned int cmd, unsigned long arg) {
             return -EINVAL;
         }
     
-        err = map_shadow_stack(req.vaddr);
+        struct ss_chunk *mem = map_shadow_stack(req.vaddr);
+        if (IS_ERR(mem)) {
+            pr_err("map_shadow_stack failed with error %ld", PTR_ERR(mem));
+            return PTR_ERR(mem);
+        }
+
+        rem = copy_to_user(&(req.top), &mem->top, sizeof(mem->top));
+        if (rem > 0) {
+            return -EINVAL;
+        }
+
         rem = copy_to_user(&(req.error), &err, sizeof(err));
         if (rem > 0) {
             return -EINVAL;
         }
-        return err;
+        return 0;
     } else {
         return -ENOTTY;
     }
