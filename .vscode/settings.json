@@ -1,3 +1,4 @@
 {
-    "cmake.sourceDirectory": "/home/francesco/Documents/Università/TESI/ShadowStackLLVM/ShadowStack"
+    "cmake.ignoreCMakeListsMissing": true,
+    "C_Cpp.errorSquiggles": "disabled"
 }

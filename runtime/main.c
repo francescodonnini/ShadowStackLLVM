@@ -11,7 +11,7 @@
 #include <sys/syscall.h>
 #include <unistd.h>
 
-#define SS_SIZE  (1024 * 1024)
+#define SHADOW_SIZE  (1024 * 1024)
 #define SS_BASE  ((uint8_t*)0x7fffffffffff)
 #define MEM_SIZE ((1024 * 1024 * 1024))
 
@@ -36,7 +36,7 @@ void SSInit(void) {
         exit(EXIT_FAILURE);
     }
 
-    if (MemPoolInit((uint8_t*)lo, SS_SIZE, MEM_SIZE) < 0) {
+    if (MemPoolInit((uint8_t*)lo, SHADOW_SIZE, MEM_SIZE) < 0) {
         exit(EXIT_FAILURE);
     }
 
