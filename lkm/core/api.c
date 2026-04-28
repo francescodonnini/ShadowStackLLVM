@@ -1,10 +1,12 @@
 #include "api.h"
 #include <asm/cpufeature.h>
-#include <asm/pgtable.h>
+#include <asm/pgtable_types.h>
 #include <asm/tlbflush.h>
 #include <linux/list.h>
+#include <linux/mm.h>
 #include <linux/mutex.h>
-#include <linux/types.h>
+#include <linux/pgtable.h>
+#include <linux/slab.h>
 #include <linux/vmalloc.h>
 
 #define SHADOW_SIZE     (1 * 1024 * 1024)
@@ -101,7 +103,6 @@ int map_shadow_stack(unsigned long vaddr) {
         mutex_unlock(&sa_mutex);
     }
 
-    __flush_tlb_all();
 
     return 0;
 }
@@ -122,15 +123,15 @@ static void unmap_shadow_pt(pgd_t *user_pgd, unsigned long vaddr) {
     pte_t *pte = pte_offset_kernel(pmd, vaddr);
     if (pte_none(*pte)) return;
 
-    pte_clear(NULL, vadd);
+    pte_clear(NULL, vaddr, pte);
 }
 
 void unmap_shadow_stack(pid_t pid) {
     pgd_t *user_pgd = get_current_user_pgd();
 
-    mutex_lock(&shadow_mutex);
-    struct shadow_mapping *mapping, *tmp;
-    list_for_each_entry_safe(mapping, tmp, &shadow_list, list) {
+    mutex_lock(&sa_mutex);
+    struct sa_desc *mapping, *tmp;
+    list_for_each_entry_safe(mapping, tmp, &sa_list, list) {
         if (mapping->pid == pid) {
             if (user_pgd) {
                 unmap_shadow_pt(user_pgd, mapping->vaddr);
@@ -140,5 +141,5 @@ void unmap_shadow_stack(pid_t pid) {
             kfree(mapping);
         }
     }
-    mutex_unlock(&shadow_mutex);
+    mutex_unlock(&sa_mutex);
 }

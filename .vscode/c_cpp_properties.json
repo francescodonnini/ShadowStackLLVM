@@ -2,7 +2,7 @@
     "configurations": [
         {
             "name": "lkm",
-            "compileCommands": "${workspaceFolder}/lkm/compile_commands.json",
+            "compileCommands": "${workspaceFolder}/lkm/build/compile_commands.json",
             "intelliSenseMode": "linux-gcc-x64"
         },
         {
