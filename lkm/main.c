@@ -6,12 +6,14 @@
 #include <linux/types.h>
 
 static int __init runtime_init(void) {
+    int err;
+
     if (boot_cpu_has(X86_FEATURE_PTI)) {
         pr_info("PTI is enabled, shadow stack will be disabled");
         return -EINVAL;
     }
 
-    int err = chrdev_init();
+    err = chrdev_init();
     if (err) {
         goto chrdev_failed;
     }

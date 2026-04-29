@@ -9,7 +9,7 @@ static uint64_t shalloc(unsigned long vaddr) {
     int fd = open("/dev/shadowstack", O_RDWR);
     if (fd < 0) {
         perror("open");
-        return NULL;
+        return 0;
     }
 
     struct ioctl_params req;
@@ -19,19 +19,22 @@ static uint64_t shalloc(unsigned long vaddr) {
     if (err < 0) {
         perror("ioctl");
         close(fd);
-        return NULL;
+        return 0;
     }
     close(fd);
     
-    printf("got chunk %ln\n", req.top);
+    printf("got chunk %ld\n", req.top);
     return req.top;
 }
 
 int main(int argc, const char *argv[]) {
     uint64_t vaddr = 0xfffffdffffffffff;
     uint64_t top = shalloc(vaddr);
-    sprintf(top, "%d", 42);
+    if (!top) {
+        printf("shalloc failed");
+    }
+    sprintf((void*)top, "%d", 42);
     int n;
-    sscanf(top, "%s", &n);
+    sscanf((void*)top, "%d", &n);
     printf("%d\n", n);
 }

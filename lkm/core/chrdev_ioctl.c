@@ -20,23 +20,28 @@ static long check_ioctl_cmd(unsigned int cmd) {
 }
 
 long chrdev_ioctl(struct file *file, unsigned int cmd, unsigned long arg) {
-    long err = check_ioctl_cmd(cmd);
+    long err;
+
+    err = check_ioctl_cmd(cmd);
     if (err) {
         return err;
     }
     if (cmd == IOCTL_SHADOW_REQ) {
+        struct ioctl_params req;
+        struct ss_chunk *mem;
+        unsigned long rem;
+
         if (!(_IOC_DIR(cmd) & (_IOC_READ | _IOC_WRITE))) {
             pr_err("ioctl: invalid request");
             return -EINVAL;
         }
 
-        struct ioctl_params req;
-        unsigned long rem = copy_from_user(&req, (struct ioctl_params *)arg, sizeof(req));
+        rem = copy_from_user(&req, (struct ioctl_params *)arg, sizeof(req));
         if (rem > 0) {
             return -EINVAL;
         }
     
-        struct ss_chunk *mem = map_shadow_stack(req.vaddr);
+        mem = map_shadow_stack(req.vaddr);
         if (IS_ERR(mem)) {
             pr_err("map_shadow_stack failed with error %ld", PTR_ERR(mem));
             return PTR_ERR(mem);
