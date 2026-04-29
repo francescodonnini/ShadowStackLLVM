@@ -5,7 +5,7 @@
 #include <sys/fcntl.h>
 #include <unistd.h>
 
-struct ss_chunk* shalloc(unsigned long vaddr) {
+static struct ss_chunk* shalloc(unsigned long vaddr) {
     int fd = open("/dev/shadowstack", O_RDWR);
     if (fd < 0) {
         perror("open");
@@ -27,4 +27,13 @@ struct ss_chunk* shalloc(unsigned long vaddr) {
     memcpy(chunk, &req.chunk, sizeof(*chunk));
     printf("got chunk %ln\n", chunk->top);
     return chunk;
+}
+
+int main(int argc, const char *argv[]) {
+    uint64_t vaddr = 0xfffffdffffffffff;
+    struct ss_chunk *chunk = shalloc(vaddr);
+    sprintf(chunk->top, "%d", 42);
+    int n;
+    sscanf(chunk->top, "%s", &n);
+    printf("%d\n", n);
 }

@@ -8,9 +8,9 @@
 #include <linux/pgtable.h>
 #include <linux/slab.h>
 #include <linux/vmalloc.h>
-
 #define SHADOW_SIZE     (1 * 1024 * 1024)
 #define SHADOW_PT_FLAGS (_PAGE_PRESENT | _PAGE_RW | _PAGE_USER | _PAGE_ACCESSED | _PAGE_DIRTY)
+
 struct sa_desc {
     pid_t pid;
     unsigned long vaddr;

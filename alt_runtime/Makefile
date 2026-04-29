@@ -1,6 +1,6 @@
 all:
 	mkdir -p build
-	clang -shared -fPIC allocator.c mapping.c main.c -o build/libruntime.so
+	gcc -shared -fPIC lkm.c main.c -o build/libruntime.so
 
 test:
 	mkdir -p build

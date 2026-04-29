@@ -14,11 +14,12 @@ enum {
 struct ss_chunk {
     struct ss_chunk *padding;
     uint64_t        *top;
+    uint64_t        *data;
 };
 
 struct ioctl_params {
     uint64_t        vaddr;
-    struct ss_chunk chunk; 
+    uint64_t        top;
     long            error;
 };
 

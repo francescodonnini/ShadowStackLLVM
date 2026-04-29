@@ -27,7 +27,7 @@ static const struct file_operations ops = {
 };
 
 static int my_uevent(const struct device *dev, __attribute__((unused)) struct kobj_uevent_env *env) {
-    add_uevent_var(env, "DEVMODE=%#o", 0440);
+    add_uevent_var(env, "DEVMODE=%#o", 0666);
     return 0;
 }
 
