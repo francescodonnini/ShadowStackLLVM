@@ -14,7 +14,8 @@
 
 struct sa_desc {
     pid_t pid;
-    unsigned long vaddr;
+    void *kaddr;
+    uint64_t vaddr;
     unsigned long size;
     struct list_head list;
 };
@@ -68,7 +69,7 @@ static pgd_t *get_current_user_pgd(void) {
     if (!mm) {
         return NULL;
     }
-    return (pgd_t *)((unsigned long)mm->pgd | PAGE_SIZE);
+    return mm->pgd;
 }
 
 struct ss_chunk* map_shadow_stack(unsigned long vaddr) {
@@ -81,10 +82,10 @@ struct ss_chunk* map_shadow_stack(unsigned long vaddr) {
     if (!mem) {
         return ERR_PTR(-ENOMEM);
     }
-    mem->top = mem->data;
+    mem->top = mem->stack;
 
     for (unsigned long offset = 0; offset < SHADOW_SIZE; offset += PAGE_SIZE) {
-        struct page *page = vmalloc_to_page(mem + offset);
+        struct page *page = vmalloc_to_page((void*)mem + offset);
         unsigned long phy = page_to_phys(page);
         int err = map_page(user_pgd, vaddr + offset, phy);
         if (err) {
@@ -98,6 +99,7 @@ struct ss_chunk* map_shadow_stack(unsigned long vaddr) {
     if (desc) {
         desc->pid = current->pid;
         desc->vaddr = vaddr;
+        desc->kaddr = mem;
         desc->size = SHADOW_SIZE;
 
         mutex_lock(&sa_mutex);
@@ -137,7 +139,7 @@ void unmap_shadow_stack(pid_t pid) {
             if (user_pgd) {
                 unmap_shadow_pt(user_pgd, mapping->vaddr);
             }
-            vfree((void *)mapping->vaddr);
+            vfree((void *)mapping->kaddr);
             list_del(&mapping->list);
             kfree(mapping);
         }

@@ -19,7 +19,6 @@ all:
 	@mkdir -p "$(BUILD_DIR)"
 	@rsync -a --exclude=build/ "$(PWD)/" "$(BUILD_DIR)/"
 	$(MAKE) -C /lib/modules/$(shell uname -r)/build M="$(BUILD_DIR)" modules
-	@cp "$(BUILD_DIR)/shadowstack_runtime.ko" "$(PWD)/"
 
 clean:
 	$(MAKE) -C /lib/modules/$(shell uname -r)/build M="$(BUILD_DIR)" clean
