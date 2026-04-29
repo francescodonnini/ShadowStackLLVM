@@ -23,6 +23,5 @@ all:
 clean:
 	$(MAKE) -C /lib/modules/$(shell uname -r)/build M="$(BUILD_DIR)" clean
 	rm -rf "$(BUILD_DIR)"
-	rm -f shadowstack_runtime.ko
 
 endif

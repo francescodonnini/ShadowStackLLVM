@@ -9,6 +9,7 @@
 #include <linux/kobject.h>
 #include <linux/sysfs.h>
 #include <linux/uaccess.h>
+#include <linux/version.h>
 
 #define DEVICE_NAME  "shadowstack"
 #define DEVICE_CLASS "shadowstack_cls"
@@ -26,7 +27,11 @@ static const struct file_operations ops = {
     .unlocked_ioctl = chrdev_ioctl
 };
 
+#if LINUX_VERSION_CODE >= KERNEL_VERSION(6,3,0)
 static int my_uevent(const struct device *dev, __attribute__((unused)) struct kobj_uevent_env *env) {
+#else
+static int my_uevent(struct device *dev, __attribute__((unused)) struct kobj_uevent_env *env) {
+#endif
     add_uevent_var(env, "DEVMODE=%#o", 0666);
     return 0;
 }
@@ -48,7 +53,11 @@ ATTRIBUTE_GROUPS(bsnapshot_dev);
  * chrdev_init - create a device to handle ioctl operations from user space.
  */
 int chrdev_init(void) {
-    int err = alloc_chrdev_region(&device.dev, 0, 1, DEVICE_NAME);
+    int err;
+    struct class *device_class;
+    struct device *dp;
+
+    err = alloc_chrdev_region(&device.dev, 0, 1, DEVICE_NAME);
     if (err) {
         pr_err("cannot register char-device %s, got error %d", DEVICE_NAME, err);
         return err;
@@ -62,7 +71,12 @@ int chrdev_init(void) {
         goto out;
     }
 
-    struct class *device_class = class_create(DEVICE_CLASS);
+#if LINUX_VERSION_CODE >= KERNEL_VERSION(6, 4, 0)
+    device_class = class_create(DEVICE_CLASS);
+#else
+    device_class = class_create(THIS_MODULE, DEVICE_CLASS);
+#endif
+
     if (IS_ERR(device_class)) {
         err = PTR_ERR(device_class);
         pr_err("cannot create class %s, got error %d", DEVICE_CLASS, err);
@@ -71,7 +85,7 @@ int chrdev_init(void) {
     device_class->dev_uevent = my_uevent;
     device.class = device_class;
 
-    struct device *dp = device_create_with_groups(device.class, NULL, device.dev, NULL, bsnapshot_dev_groups, DEVICE_NAME);
+    dp = device_create_with_groups(device.class, NULL, device.dev, NULL, bsnapshot_dev_groups, DEVICE_NAME);
     if (IS_ERR(dp)) {
         err = PTR_ERR(dp);
         pr_err("cannot create device /dev/%s, got error %d", DEVICE_NAME, err);
