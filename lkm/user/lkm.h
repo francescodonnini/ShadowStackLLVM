@@ -11,18 +11,9 @@ enum {
     IOCTL_SHADOW_MAX_NR
 };
 
-struct ss_chunk {
-    struct ss_chunk *padding;
-    uint64_t        *top;
-    uint64_t        *data;
-};
-
 struct ioctl_params {
     uint64_t        vaddr;
     uint64_t        top;
     long            error;
 };
-
-struct ss_chunk* MemPoolAlloc(void);
-
 #endif
