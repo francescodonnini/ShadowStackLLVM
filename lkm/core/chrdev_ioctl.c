@@ -26,6 +26,7 @@ long chrdev_ioctl(struct file *file, unsigned int cmd, unsigned long arg) {
     }
     if (cmd == IOCTL_SHADOW_REQ) {
         if (!(_IOC_DIR(cmd) & (_IOC_READ | _IOC_WRITE))) {
+            pr_err("ioctl: invalid request");
             return -EINVAL;
         }
 
@@ -41,12 +42,9 @@ long chrdev_ioctl(struct file *file, unsigned int cmd, unsigned long arg) {
             return PTR_ERR(mem);
         }
 
-        rem = copy_to_user(&(req.top), &mem->top, sizeof(mem->top));
-        if (rem > 0) {
-            return -EINVAL;
-        }
-
-        rem = copy_to_user(&(req.error), &err, sizeof(err));
+        req.top = (uint64_t)mem->top;
+        req.error = err;
+        rem = copy_to_user((struct ioctl_params*)arg, &req, sizeof(req));
         if (rem > 0) {
             return -EINVAL;
         }

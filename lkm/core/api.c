@@ -6,6 +6,7 @@
 #include <linux/mm.h>
 #include <linux/mutex.h>
 #include <linux/pgtable.h>
+#include <linux/printk.h>
 #include <linux/slab.h>
 #include <linux/vmalloc.h>
 #define SHADOW_SIZE     (1 * 1024 * 1024)
@@ -64,7 +65,7 @@ static int map_page(pgd_t *user_pgd, unsigned long vaddr, unsigned long phy) {
 
 static pgd_t *get_current_user_pgd(void) {
     struct mm_struct *mm = current->mm;
-    if (!mm || !boot_cpu_has(X86_FEATURE_PTI)) {
+    if (!mm) {
         return NULL;
     }
     return (pgd_t *)((unsigned long)mm->pgd | PAGE_SIZE);
