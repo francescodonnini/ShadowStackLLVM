@@ -18,6 +18,7 @@ typedef struct {
 } PThreadWrapperArgs;
 
 extern int shadow_fd;
+static struct ss_chunk *main_thread_chunk = NULL;
 static pthread_key_t ss_cleanup_key;
 static pthread_once_t key_once = PTHREAD_ONCE_INIT;
 
@@ -42,11 +43,24 @@ static inline void get_chunk(struct ss_chunk *chunk) {
 
 __attribute__((constructor))
 void SSInit(void) {
-    struct ss_chunk *main_chunk = MemPoolAlloc();
-    if (!main_chunk) {
+    main_thread_chunk = MemPoolAlloc();
+    if (!main_thread_chunk) {
         exit(EXIT_FAILURE);
     }
-    get_chunk(main_chunk);
+    get_chunk(main_thread_chunk);
+}
+
+__attribute__((destructor))
+void SSFini(void) {
+    if (main_thread_chunk && shadow_fd >= 0) {
+        struct ioctl_params req = { .error = 0, .addr = (unsigned long long)main_thread_chunk };
+        ioctl(shadow_fd, IOCTL_SHADOW_FREE, &req);
+    }
+    
+    if (shadow_fd >= 0) {
+        close(shadow_fd);
+        shadow_fd = -1;
+    }
 }
 
 void SSThreadInit(void) {
