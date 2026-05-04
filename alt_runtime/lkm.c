@@ -5,26 +5,26 @@
 #include <sys/fcntl.h>
 #include <unistd.h>
 
-struct ss_chunk* shalloc(unsigned long vaddr) {
-    int fd = open("/dev/shadowstack", O_RDWR);
-    if (fd < 0) {
-        perror("open");
-        return NULL;
+static int shadow_fd = -1;
+
+struct ss_chunk* MemPoolAlloc(void) {
+    if (shadow_fd < 0) {
+        shadow_fd = open("/dev/shadowstack", O_RDWR);
+        if (shadow_fd < 0) {
+            perror("open");
+            return NULL;
+        }
     }
 
-    struct ioctl_params req;
-    req.vaddr = vaddr;
-
-    long err = ioctl(fd, IOCTL_SHADOW_REQ, &req);
-    if (err < 0) {
+    struct ioctl_params req = { .error = 0, .addr = 0 };
+    long err = ioctl(shadow_fd, IOCTL_SHADOW_REQ, &req);
+    if (err < 0 || !req.error) {
         perror("ioctl");
-        close(fd);
         return NULL;
     }
-    close(fd);
     
-    struct ss_chunk *chunk = malloc(sizeof(struct ss_chunk));
-    memcpy(chunk, &req.chunk, sizeof(*chunk));
-    printf("got chunk %ln\n", chunk->top);
+    struct ss_chunk *chunk = (struct ss_chunk *)req.addr;
+    chunk->padding = NULL;
+    chunk->top = chunk->data;
     return chunk;
 }

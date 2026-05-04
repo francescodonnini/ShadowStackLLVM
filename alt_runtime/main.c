@@ -17,6 +17,22 @@ typedef struct {
     void *original_arg;
 } PThreadWrapperArgs;
 
+extern int shadow_fd;
+static pthread_key_t ss_cleanup_key;
+static pthread_once_t key_once = PTHREAD_ONCE_INIT;
+
+static void ss_dtor(void *arg) {
+    struct ss_chunk *chunk = arg;
+    if (chunk && shadow_fd >= 0) {
+        struct ioctl_params req = { .error = 0, .addr = (unsigned long long)chunk };
+        ioctl(shadow_fd, IOCTL_SHADOW_FREE, &req);
+    }
+}
+
+static void make_key(void) {
+    pthread_key_create(&ss_cleanup_key, ss_dtor);
+}
+
 static inline void get_chunk(struct ss_chunk *chunk) {
      if (syscall(SYS_arch_prctl, ARCH_SET_GS, (unsigned long)chunk) != 0) {
         perror("[ss] arch_prctl failed");
@@ -34,12 +50,15 @@ void SSInit(void) {
 }
 
 void SSThreadInit(void) {
+    pthread_once(&key_once, make_key);
+
     struct ss_chunk *chunk = MemPoolAlloc();
     if (!chunk) {
         exit(EXIT_FAILURE);
     }
 
     get_chunk(chunk);
+    pthread_setspecific(ss_cleanup_key, chunk);
 }
 
 static void *thread_trampoline(void *arg) {

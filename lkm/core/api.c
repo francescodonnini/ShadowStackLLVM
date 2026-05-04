@@ -311,3 +311,41 @@ no_allocator:
     kfree(t_desc);
     return err;
 }
+
+long sa_free(uint64_t usr_addr){
+    struct sa_allocator_desc *alloc;
+    struct sa_thread_desc *t_desc, *tmp;
+    struct mm_struct *mm = current->mm;
+    bool found = false;
+    unsigned long offset;
+
+    if (!mm) return -EINVAL;
+
+    alloc = alloc_get_or_creat(current->tgid);
+    if (!alloc) return -EINVAL;
+
+    spin_lock(&alloc->fl_lock);
+    list_for_each_entry_safe(t_desc, tmp, &alloc->active_list, list) {
+        if (t_desc->usr_addr == usr_addr) {
+            list_del(&t_desc->list);
+            found = true;
+            break;
+        }
+    }
+    spin_unlock(&alloc->fl_lock);
+
+    if (!found) return -EINVAL;
+
+    mmap_write_lock(mm);
+    for (offset = 0; offset < SS_SIZE; offset += PAGE_SIZE) {
+        unmap_ss_page(mm, usr_addr + offset);
+    }
+    my_flush_tlb_mm(mm);
+    mmap_write_unlock(mm);
+
+    gl_free(t_desc->kernel_addr);
+    alloc_add_vaddr(alloc, usr_addr);
+    kfree(t_desc);
+
+    return 0;
+}
