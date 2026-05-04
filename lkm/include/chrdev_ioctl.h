@@ -11,9 +11,8 @@ enum {
     IOCTL_SHADOW_MAX_NR
 };
 
-struct ioctl_params {
-    uint64_t vaddr;
-    uint64_t top; 
-    long     error;
+struct ioctl_params { 
+    long error;
+    unsigned long long addr;
 };
 #endif

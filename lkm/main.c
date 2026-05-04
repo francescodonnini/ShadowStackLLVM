@@ -1,3 +1,4 @@
+#include "api.h"
 #include "chrdev.h"
 #include <linux/init.h>
 #include <linux/module.h>
@@ -11,6 +12,10 @@ static int __init runtime_init(void) {
     if (boot_cpu_has(X86_FEATURE_PTI)) {
         pr_info("PTI is enabled, shadow stack will be disabled");
         return -EINVAL;
+    }
+
+    if (resolve_symbols() < 0) {
+        return -1;
     }
 
     err = chrdev_init();

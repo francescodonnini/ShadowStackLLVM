@@ -1,7 +1,6 @@
 #include "api.h"
 #include "chrdev.h"
 #include "chrdev_ioctl.h"
-#include "pr_format.h"
 #include <asm/errno.h>
 #include <linux/printk.h>
 #include <linux/slab.h>
@@ -28,8 +27,8 @@ long chrdev_ioctl(struct file *file, unsigned int cmd, unsigned long arg) {
     }
     if (cmd == IOCTL_SHADOW_REQ) {
         struct ioctl_params req;
-        struct ss_chunk *mem;
         unsigned long rem;
+        unsigned long long addr;
 
         if (!(_IOC_DIR(cmd) & (_IOC_READ | _IOC_WRITE))) {
             pr_err("ioctl: invalid request");
@@ -41,14 +40,8 @@ long chrdev_ioctl(struct file *file, unsigned int cmd, unsigned long arg) {
             return -EINVAL;
         }
     
-        mem = map_shadow_stack(req.vaddr);
-        if (IS_ERR(mem)) {
-            pr_err("map_shadow_stack failed with error %ld", PTR_ERR(mem));
-            return PTR_ERR(mem);
-        }
-
-        req.top = (uint64_t)mem->top;
-        req.error = err;
+        req.error = sa_alloc(&addr);
+        req.addr = addr;
         rem = copy_to_user((struct ioctl_params*)arg, &req, sizeof(req));
         if (rem > 0) {
             return -EINVAL;
