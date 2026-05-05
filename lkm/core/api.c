@@ -83,7 +83,7 @@ static void gl_free(void *kaddr) {
     }
     desc->kernel_addr = kaddr;
     spin_lock(&global_vma_lock);
-    list_add(&global_vma_list, &desc->list);
+    list_add(&desc->list, &global_vma_list);
     spin_unlock(&global_vma_lock);
 }
 

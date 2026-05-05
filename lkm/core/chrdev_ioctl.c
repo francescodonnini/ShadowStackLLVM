@@ -45,7 +45,7 @@ long chrdev_ioctl(struct file *file, unsigned int cmd, unsigned long arg) {
         if (cmd == IOCTL_SHADOW_REQ) {
             req.error = sa_alloc(&addr);
             req.addr = addr;
-        } else if (cmd == IOCTL_SHADOW_TDOWN) {
+        } else if (cmd == IOCTL_SHADOW_FREE) {
             req.error = sa_free(req.addr);
         } else {
             req.error = sa_tdown();
