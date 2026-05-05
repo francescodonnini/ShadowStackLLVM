@@ -8,6 +8,10 @@
                 "/usr/src/linux-headers-5.15.0-139-generic/arch/x86/include",
                 "/usr/src/linux-headers-5.15.0-139-generic/arch/x86/include/generated",
                 "/usr/src/linux-headers-5.15.0-139-generic/include/generated",
+                "/usr/src/linux-headers-5.15.0-139-generic/include/uapi",
+    "/usr/src/linux-headers-5.15.0-139-generic/include/generated/uapi",
+    "/usr/src/linux-headers-5.15.0-139-generic/arch/x86/include/uapi",
+    "/usr/src/linux-headers-5.15.0-139-generic/arch/x86/include/generated/uapi",
                 "/usr/lib/gcc/x86_64-linux-gnu/*/include"
             ],
             "defines": [

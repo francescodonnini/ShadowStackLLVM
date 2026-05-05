@@ -38,18 +38,20 @@ static inline void my_flush_tlb_mm(struct mm_struct *mm) {
 }
 
 static inline pte_t *my_pte_offset_map_lock(struct mm_struct *mm, pmd_t *pmd, unsigned long addr, spinlock_t **ptlp) {
+#if LINUX_VERSION_CODE > KERNEL_VERSION(6, 4, 0)
     pte_t *pte;
 
 	__cond_lock(*ptlp, pte = __pte_offset_map_lock_bnd(mm, pmd, addr, ptlp));
 	return pte;
+#else
+    return pte_offset_map_lock(mm, pmd, addr, ptlp);
+#endif
 }
 
 static inline pte_t *my_pte_alloc_map_lock(struct mm_struct *mm, pmd_t *pmd, unsigned long addr, spinlock_t **ptlp) {
-#if LINUX_VERSION_CODE >= KERNEL_VERSION(6, 4, 0)
-    return (my_pte_alloc(mm, pmd) ? NULL : my_pte_offset_map_lock(mm, pmd, addr, ptlp));
-#else
-    return pte_alloc_map_lock(mm, pmd, addr, ptlp);
-#endif
+    return my_pte_alloc(mm, pmd) 
+        ? NULL
+        : my_pte_offset_map_lock(mm, pmd, addr, ptlp);
 }
 
 #endif

@@ -15,48 +15,52 @@ static long check_ioctl_cmd(unsigned int cmd) {
         pr_err("number too high");
         return -EINVAL;
     }
+
+    switch (cmd) {
+    case IOCTL_SHADOW_REQ:
+    case IOCTL_SHADOW_FREE:
+    case IOCTL_SHADOW_TDOWN:
+        break;
+    default:
+        return -ENOTTY;
+    }
+
+    if (!(_IOC_DIR(cmd) & (_IOC_READ | _IOC_WRITE))) {
+        pr_err("ioctl: invalid request direction\n");
+        return -EINVAL;
+    }
+    
     return 0;
 }
 
 long chrdev_ioctl(struct file *file, unsigned int cmd, unsigned long arg) {
+    struct ioctl_params __user *user_arg = (struct ioctl_params __user *)arg;
+    struct ioctl_params req;
+    unsigned long long addr;
     long err;
 
     err = check_ioctl_cmd(cmd);
-    if (err) {
+    if (err)
         return err;
-    }
-    if (cmd == IOCTL_SHADOW_REQ
-        || cmd == IOCTL_SHADOW_FREE
-        || cmd == IOCTL_SHADOW_TDOWN) {
-        struct ioctl_params req;
-        unsigned long rem;
-        unsigned long long addr;
 
-        if (!(_IOC_DIR(cmd) & (_IOC_READ | _IOC_WRITE))) {
-            pr_err("ioctl: invalid request");
-            return -EINVAL;
-        }
+    if (copy_from_user(&req, user_arg, sizeof(req)))
+        return -EFAULT;
 
-        rem = copy_from_user(&req, (struct ioctl_params *)arg, sizeof(req));
-        if (rem > 0) {
-            return -EINVAL;
-        }
-    
-        if (cmd == IOCTL_SHADOW_REQ) {
-            req.error = sa_alloc(&addr);
-            req.addr = addr;
-        } else if (cmd == IOCTL_SHADOW_FREE) {
-            req.error = sa_free(req.addr);
-        } else {
-            req.error = sa_tdown();
-        }
-        
-        rem = copy_to_user((struct ioctl_params*)arg, &req, sizeof(req));
-        if (rem > 0) {
-            return -EINVAL;
-        }
-        return 0;
-    } else {
-        return -ENOTTY;
+    switch (cmd) {
+    case IOCTL_SHADOW_REQ:
+        req.error = sa_alloc(&addr);
+        req.addr = addr;
+        break;
+    case IOCTL_SHADOW_FREE:
+        req.error = sa_free(req.addr);
+        break;
+    case IOCTL_SHADOW_TDOWN:
+        req.error = sa_tdown();
+        break;
     }
+
+    if (copy_to_user(user_arg, &req, sizeof(req)))
+        return -EFAULT;
+
+    return 0;
 }
