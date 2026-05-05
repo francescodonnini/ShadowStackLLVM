@@ -2,12 +2,12 @@
 #include "api.h"
 #include <linux/kprobes.h>
 
-__p4d_alloc_t my__p4d_alloc;
-__pud_alloc_t my__pud_alloc;
-__pmd_alloc_t my__pmd_alloc;
-__pte_alloc_t my__pte_alloc;
-__pte_offset_map_lock_t my__pte_offset_map_lock;
-__flush_tlb_mm_range_t my__flush_tlb_mm_range;
+__p4d_alloc_t __p4d_alloc_bnd = NULL;
+__pud_alloc_t __pud_alloc_bnd = NULL;
+__pmd_alloc_t __pmd_alloc_bnd = NULL;
+__pte_alloc_t __pte_alloc_bnd = NULL;
+__pte_offset_map_lock_t __pte_offset_map_lock_bnd;
+__flush_tlb_mm_range_t __flush_tlb_mm_range_bnd;
 
 
 static struct kprobe kp = {
@@ -27,17 +27,17 @@ long resolve_symbols(void) {
         pr_err("could not find kallsyms_lookup_name");
         return -1;
     }
-    my__p4d_alloc = (__p4d_alloc_t) ksyms_lookup("__p4d_alloc");
-    if (!my__p4d_alloc) return -1;
-    my__pud_alloc = (__pud_alloc_t) ksyms_lookup("__pud_alloc");
-    if (!my__pud_alloc) return -1;
-    my__pmd_alloc = (__pmd_alloc_t) ksyms_lookup("__pmd_alloc");
-    if (!my__pmd_alloc) return -1;
-    my__pte_alloc = (__pte_alloc_t) ksyms_lookup("__pte_alloc");
-    if (!my__pte_alloc) return -1;
-    my__flush_tlb_mm_range = (__flush_tlb_mm_range_t) ksyms_lookup("flush_tlb_mm_range");
-    if (!my__flush_tlb_mm_range) return -1;
-    my__pte_offset_map_lock = (__pte_offset_map_lock_t) ksyms_lookup("__pte_offset_map_lock");
-    if (!my__pte_offset_map_lock) return -1;
+    __p4d_alloc_bnd = (__p4d_alloc_t) ksyms_lookup("__p4d_alloc");
+    if (!__p4d_alloc_bnd) return -1;
+    __pud_alloc_bnd = (__pud_alloc_t) ksyms_lookup("__pud_alloc");
+    if (!__pud_alloc_bnd) return -1;
+    __pmd_alloc_bnd = (__pmd_alloc_t) ksyms_lookup("__pmd_alloc");
+    if (!__pmd_alloc_bnd) return -1;
+    __pte_alloc_bnd = (__pte_alloc_t) ksyms_lookup("__pte_alloc");
+    if (!__pte_alloc_bnd) return -1;
+    __flush_tlb_mm_range_bnd = (__flush_tlb_mm_range_t) ksyms_lookup("flush_tlb_mm_range");
+    if (!__flush_tlb_mm_range_bnd) return -1;
+    __pte_offset_map_lock_bnd = (__pte_offset_map_lock_t) ksyms_lookup("__pte_offset_map_lock");
+    if (!__pte_offset_map_lock_bnd) return -1;
     return 0;
 }
