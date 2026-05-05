@@ -56,6 +56,9 @@ void SSFini(void) {
         struct ioctl_params req = { .error = 0, .addr = (unsigned long long)main_thread_chunk };
         ioctl(shadow_fd, IOCTL_SHADOW_FREE, &req);
     }
+
+    struct ioctl_params req = { .error = 0 };
+    ioctl(shadow_fd, IOCTL_SHADOW_TDOWN, &req);
     
     if (shadow_fd >= 0) {
         close(shadow_fd);

@@ -25,7 +25,9 @@ long chrdev_ioctl(struct file *file, unsigned int cmd, unsigned long arg) {
     if (err) {
         return err;
     }
-    if (cmd == IOCTL_SHADOW_REQ || cmd == IOCTL_SHADOW_FREE) {
+    if (cmd == IOCTL_SHADOW_REQ
+        || cmd == IOCTL_SHADOW_FREE
+        || cmd == IOCTL_SHADOW_TDOWN) {
         struct ioctl_params req;
         unsigned long rem;
         unsigned long long addr;
@@ -43,8 +45,10 @@ long chrdev_ioctl(struct file *file, unsigned int cmd, unsigned long arg) {
         if (cmd == IOCTL_SHADOW_REQ) {
             req.error = sa_alloc(&addr);
             req.addr = addr;
-        } else {
+        } else if (cmd == IOCTL_SHADOW_TDOWN) {
             req.error = sa_free(req.addr);
+        } else {
+            req.error = sa_tdown();
         }
         
         rem = copy_to_user((struct ioctl_params*)arg, &req, sizeof(req));

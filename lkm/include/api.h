@@ -6,6 +6,8 @@ long sa_alloc(uint64_t *vaddr);
 
 long sa_free(uint64_t usr_addr);
 
+long sa_tdown(void);
+
 long resolve_symbols(void);
 
 #endif

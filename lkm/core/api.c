@@ -1,6 +1,7 @@
 #include "api.h"
 #include "pt_bindings.h"
 #include <asm/cpufeature.h>
+#include <asm/pgalloc.h>
 #include <asm/pgtable_types.h>
 #include <asm/tlbflush.h>
 #include <linux/atomic.h>
@@ -201,7 +202,7 @@ static struct sa_allocator_desc* alloc_get_or_creat(pid_t tgid) {
     return alloc;
 }
 
-void alloc_add_vaddr(struct sa_allocator_desc *alloc, uint64_t vaddr) {
+static void alloc_add_vaddr(struct sa_allocator_desc *alloc, uint64_t vaddr) {
     struct sa_free_vaddr_desc *desc;
     desc = kmalloc(sizeof(*desc), GFP_KERNEL);
     if (!desc) return;
@@ -233,7 +234,7 @@ static void unmap_ss_page(struct mm_struct *mm, uint64_t vaddr) {
     pmd = pmd_offset(pud, vaddr);
     if (pmd_none(*pmd) || pmd_bad(*pmd)) return;
 
-    ptep = pte_offset_map_lock(mm, pmd, vaddr, &ptl);
+    ptep = compat_pte_offset_map_lock(mm, pmd, vaddr, &ptl);
     if (!ptep) return;
 
     pte_clear(mm, vaddr, ptep);
@@ -346,6 +347,64 @@ long sa_free(uint64_t usr_addr){
     gl_free(t_desc->kernel_addr);
     alloc_add_vaddr(alloc, usr_addr);
     kfree(t_desc);
+
+    return 0;
+}
+
+long sa_tdown(void) {
+    struct mm_struct *mm;
+    unsigned long offset;
+
+    mm = current->mm;
+    if (!mm) return -EINVAL;
+
+    for (offset = SS_START; offset < SS_END; offset += PMD_SIZE) {
+        pgd_t *pgd;
+        p4d_t *p4d;
+        pud_t *pud;
+        pmd_t *pmd;
+
+        pgd = pgd_offset(mm, offset);
+        p4d = p4d_offset(pgd, offset);
+        if (p4d_none(*p4d) || p4d_bad(*p4d)) continue;
+        pud = pud_offset(p4d, offset);
+        if (pud_none(*pud) || pud_bad(*pud)) continue;
+        pmd = pmd_offset(pud, offset);
+        if (pmd_none(*pmd) || pmd_bad(*pmd)) continue;
+
+        pmd_clear(pmd);
+    }
+
+    for (offset = SS_START; offset < SS_END; offset += PUD_SIZE) {
+        pgd_t *pgd;
+        p4d_t *p4d;
+        pud_t *pud;
+        pmd_t *pmd;
+
+        pgd = pgd_offset(mm, offset);
+        p4d = p4d_offset(pgd, offset);
+        if (p4d_none(*p4d) || p4d_bad(*p4d)) continue;
+        pud = pud_offset(p4d, offset);
+        if (pud_none(*pud) || pud_bad(*pud)) continue;
+
+        pmd = pmd_offset(pud, offset);
+        pud_clear(pud);
+        pmd_free(mm, pmd);
+    }
+
+    for (offset = SS_START; offset < SS_END; offset += P4D_SIZE) {
+        pgd_t *pgd;
+        p4d_t *p4d;
+        pud_t *pud;
+
+        pgd = pgd_offset(mm, offset);
+        p4d = p4d_offset(pgd, offset);
+        if (p4d_none(*p4d) || p4d_bad(*p4d)) continue;
+
+        pud = pud_offset(p4d, offset);
+        p4d_clear(p4d);
+        pud_free(mm, pud);
+    }
 
     return 0;
 }
