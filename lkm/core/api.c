@@ -355,7 +355,7 @@ static void sa_free_pte(struct mm_struct *mm, pte_t *pte_start, pmd_t *pmd) {
     pte_t *pte;
     int i;
 
-    for (i = 0; i < PTRS_PER_PMD; i++) {
+    for (i = 0; i < PTRS_PER_PTE; i++) {
         pte = pte_start + i;
         if (!pte_none(ptep_get(pte)))
             return;
@@ -389,7 +389,7 @@ static void sa_free_pud(struct mm_struct *mm, pud_t *pud_start, p4d_t *p4d) {
             return;
     }
 
-    pud_free(mm, (pud_t*)page_to_virt(pud_page(*pud)));
+    pud_free(mm, (pud_t*)page_to_virt(pud_page(*p4d)));
     p4d_clear(p4d);
 }
 
@@ -411,7 +411,7 @@ static void sa_remove_pte(struct mm_struct *mm, pte_t *pte, unsigned long addr, 
     unsigned long next;
     pte_t ptent;
 
-    for (; addr <= end; addr = next, pte++) {
+    for (; addr < end; addr = next, pte++) {
         next = (addr + PAGE_SIZE) & PAGE_MASK;
         if (next > end)
             next = end;
@@ -496,6 +496,7 @@ static void sa_remove(struct mm_struct *mm, unsigned long start, unsigned long e
 long sa_tdown(struct mm_struct *mm) {
     mmap_write_lock(mm);
     sa_remove(mm, SS_START, SS_END);
+    my_flush_tlb_mm(mm);
     mmap_write_unlock(mm);
     return 0;
 }

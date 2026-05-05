@@ -76,11 +76,6 @@ int main(void) {
     }
 
     printf("[Main] Stress test complete.\n");
-
-    struct ioctl_params req = { .error = 0, .addr = 0 };
-    if (ioctl(fd, IOCTL_SHADOW_TDOWN, &req) < 0) {
-        perror("[Worker] ioctl failed");
-    }
     close(fd);
 
 
