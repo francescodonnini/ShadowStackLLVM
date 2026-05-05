@@ -234,7 +234,7 @@ static void unmap_ss_page(struct mm_struct *mm, uint64_t vaddr) {
     pmd = pmd_offset(pud, vaddr);
     if (pmd_none(*pmd) || pmd_bad(*pmd)) return;
 
-    ptep = compat_pte_offset_map_lock(mm, pmd, vaddr, &ptl);
+    ptep = my_pte_offset_map_lock(mm, pmd, vaddr, &ptl);
     if (!ptep) return;
 
     pte_clear(mm, vaddr, ptep);
@@ -358,6 +358,7 @@ long sa_tdown(void) {
     mm = current->mm;
     if (!mm) return -EINVAL;
 
+    mmap_write_lock(mm);
     for (offset = SS_START; offset < SS_END; offset += PMD_SIZE) {
         pgd_t *pgd;
         p4d_t *p4d;
@@ -365,13 +366,18 @@ long sa_tdown(void) {
         pmd_t *pmd;
 
         pgd = pgd_offset(mm, offset);
+        if (pgd_none(*pgd) || pgd_bad(*pgd)) continue;
+        
         p4d = p4d_offset(pgd, offset);
         if (p4d_none(*p4d) || p4d_bad(*p4d)) continue;
+        
         pud = pud_offset(p4d, offset);
         if (pud_none(*pud) || pud_bad(*pud)) continue;
+        
         pmd = pmd_offset(pud, offset);
         if (pmd_none(*pmd) || pmd_bad(*pmd)) continue;
 
+        pte_free(mm, pmd_page(*pmd)); 
         pmd_clear(pmd);
     }
 
@@ -382,12 +388,15 @@ long sa_tdown(void) {
         pmd_t *pmd;
 
         pgd = pgd_offset(mm, offset);
+        if (pgd_none(*pgd) || pgd_bad(*pgd)) continue;
+        
         p4d = p4d_offset(pgd, offset);
         if (p4d_none(*p4d) || p4d_bad(*p4d)) continue;
+        
         pud = pud_offset(p4d, offset);
         if (pud_none(*pud) || pud_bad(*pud)) continue;
 
-        pmd = pmd_offset(pud, offset);
+        pmd = pmd_offset(pud, offset & PUD_MASK);
         pud_clear(pud);
         pmd_free(mm, pmd);
     }
@@ -398,13 +407,17 @@ long sa_tdown(void) {
         pud_t *pud;
 
         pgd = pgd_offset(mm, offset);
+        if (pgd_none(*pgd) || pgd_bad(*pgd)) continue;
+        
         p4d = p4d_offset(pgd, offset);
         if (p4d_none(*p4d) || p4d_bad(*p4d)) continue;
 
-        pud = pud_offset(p4d, offset);
+        pud = pud_offset(p4d, offset & P4D_MASK);
         p4d_clear(p4d);
         pud_free(mm, pud);
     }
-
+    my_flush_tlb_mm(mm);
+    mmap_write_unlock(mm);
+    
     return 0;
 }

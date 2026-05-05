@@ -44,6 +44,10 @@ void* worker_thread(void* arg) {
     // 4. Read it back to verify the page is mapped and strictly isolated
     printf("[Thread %ld] Data check: \"%s\"\n", thread_id, my_stack);
 
+    if (ioctl(fd, IOCTL_SHADOW_FREE, &req) < 0) {
+        perror("[Worker] ioctl failed");
+    }
+
     return NULL;
 }
 
@@ -73,6 +77,6 @@ int main(void) {
 
     close(fd);
     printf("[Main] Stress test complete.\n");
-    
+
     return EXIT_SUCCESS;
 }

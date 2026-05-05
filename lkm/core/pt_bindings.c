@@ -6,11 +6,9 @@ __p4d_alloc_t my__p4d_alloc;
 __pud_alloc_t my__pud_alloc;
 __pmd_alloc_t my__pmd_alloc;
 __pte_alloc_t my__pte_alloc;
+__pte_offset_map_lock_t my__pte_offset_map_lock;
 __flush_tlb_mm_range_t my__flush_tlb_mm_range;
 
-#if LINUX_VERSION_CODE >= KERNEL_VERSION(5, 15, 0)
-__pte_offset_map_lock_t my__pte_offset_map_lock;
-#endif
 
 static struct kprobe kp = {
     .symbol_name = "kallsyms_lookup_name"
@@ -39,9 +37,7 @@ long resolve_symbols(void) {
     if (!my__pte_alloc) return -1;
     my__flush_tlb_mm_range = (__flush_tlb_mm_range_t) ksyms_lookup("flush_tlb_mm_range");
     if (!my__flush_tlb_mm_range) return -1;
-#if LINUX_VERSION_CODE >= KERNEL_VERSION(6, 4, 0)
     my__pte_offset_map_lock = (__pte_offset_map_lock_t) ksyms_lookup("__pte_offset_map_lock");
     if (!my__pte_offset_map_lock) return -1;
-#endif
     return 0;
 }
