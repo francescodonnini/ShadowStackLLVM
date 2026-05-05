@@ -19,7 +19,6 @@ static long check_ioctl_cmd(unsigned int cmd) {
     switch (cmd) {
     case IOCTL_SHADOW_REQ:
     case IOCTL_SHADOW_FREE:
-    case IOCTL_SHADOW_TDOWN:
         break;
     default:
         return -ENOTTY;
@@ -53,9 +52,6 @@ long chrdev_ioctl(struct file *file, unsigned int cmd, unsigned long arg) {
         break;
     case IOCTL_SHADOW_FREE:
         req.error = sa_free(req.addr);
-        break;
-    case IOCTL_SHADOW_TDOWN:
-        req.error = sa_tdown();
         break;
     }
 

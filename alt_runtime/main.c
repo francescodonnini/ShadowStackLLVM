@@ -50,22 +50,6 @@ void SSInit(void) {
     get_chunk(main_thread_chunk);
 }
 
-__attribute__((destructor))
-void SSFini(void) {
-    if (main_thread_chunk && shadow_fd >= 0) {
-        struct ioctl_params req = { .error = 0, .addr = (unsigned long long)main_thread_chunk };
-        ioctl(shadow_fd, IOCTL_SHADOW_FREE, &req);
-    }
-
-    struct ioctl_params req = { .error = 0 };
-    ioctl(shadow_fd, IOCTL_SHADOW_TDOWN, &req);
-    
-    if (shadow_fd >= 0) {
-        close(shadow_fd);
-        shadow_fd = -1;
-    }
-}
-
 void SSThreadInit(void) {
     pthread_once(&key_once, make_key);
 

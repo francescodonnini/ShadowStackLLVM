@@ -1,5 +1,6 @@
-#include "chrdev_ioctl.h"
 #include "chrdev.h"
+#include "chrdev_fops.h"
+#include "chrdev_ioctl.h"
 #include <linux/cdev.h>
 #include <linux/device.h>
 #include <linux/device/class.h>
@@ -23,7 +24,9 @@ static struct bsnapshot_cdev device;
 
 static const struct file_operations ops = {
     .owner   = THIS_MODULE,
-    .unlocked_ioctl = chrdev_ioctl
+    .unlocked_ioctl = chrdev_ioctl,
+    .open = shadow_open,
+    .release = shadow_release,
 };
 
 #if LINUX_VERSION_CODE >= KERNEL_VERSION(6,3,0)
