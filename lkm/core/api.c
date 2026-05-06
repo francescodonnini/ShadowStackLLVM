@@ -361,7 +361,8 @@ static void sa_free_pte(struct mm_struct *mm, pte_t *pte_start, pmd_t *pmd) {
             return;
     }
 
-    pte_free_kernel(mm, (pte_t*)page_to_virt(pmd_page(*pmd)));
+    mm_dec_nr_ptes(mm);
+    pte_free(mm, pmd_page(*pmd));
     pmd_clear(pmd);
 } 
 
@@ -375,6 +376,7 @@ static void sa_free_pmd(struct mm_struct *mm, pmd_t *pmd_start, pud_t *pud) {
             return;
     }
 
+    mm_dec_nr_pmds(mm);
     pmd_free(mm, (pmd_t*)page_to_virt(pud_page(*pud)));
     pud_clear(pud);
 } 
@@ -389,6 +391,7 @@ static void sa_free_pud(struct mm_struct *mm, pud_t *pud_start, p4d_t *p4d) {
             return;
     }
 
+    mm_dec_nr_puds(mm);
     pud_free(mm, (pud_t*)page_to_virt(p4d_page(*p4d)));
     p4d_clear(p4d);
 }
@@ -403,6 +406,7 @@ static void sa_free_p4d(struct mm_struct *mm, p4d_t *p4d_start, pgd_t *pgd) {
             return;
     }
 
+    mm_dec_nr_p4ds(mm);
     p4d_free(mm, (p4d_t*)page_to_virt(pgd_page(*pgd)));
     pgd_clear(pgd);
 }
