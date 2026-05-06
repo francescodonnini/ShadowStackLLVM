@@ -10,8 +10,11 @@
 #include <sys/syscall.h>
 #include <unistd.h>
 
-typedef pid_t (*real_fork)(void);
-typedef int (*real_pthread_create)(pthread_t*, const pthread_attr_t*, void* (*)(void*), void*);
+typedef pid_t (*real_fork_t)(void);
+typedef int   (*real_pthread_create_t)(pthread_t*, const pthread_attr_t*, void* (*)(void*), void*);
+
+static real_fork_t real_fork = NULL;
+static real_pthread_create_t real_pthread_create = NULL;
 
 typedef struct {
     void *(*original_routine)(void *);
@@ -44,6 +47,9 @@ static inline void get_chunk(struct ss_chunk *chunk) {
 
 __attribute__((constructor))
 void shadow_stack_init(void) {
+    real_fork = (real_fork_t)dlsym(RTLD_NEXT, "fork");
+    real_pthread_create = (real_pthread_create_t)dlsym(RTLD_NEXT, "pthread_create");
+
     main_thread_chunk = mem_pool_alloc();
     if (!main_thread_chunk) {
         exit(EXIT_FAILURE);
@@ -76,11 +82,6 @@ static void *thread_trampoline(void *arg) {
 }
 
 int pthread_create(pthread_t *thread, const pthread_attr_t *attr, void *(*start_routine)(void *), void *arg) {
-    static real_pthread_create pthrad_create_cb = NULL;
-    if (!pthrad_create_cb) {
-        pthrad_create_cb = (real_pthread_create)dlsym(RTLD_NEXT, "pthread_create");
-    }
-
     pthread_wargs *wrapper_args = malloc(sizeof(pthread_wargs));
     if (!wrapper_args) {
         return -1; 
@@ -88,7 +89,7 @@ int pthread_create(pthread_t *thread, const pthread_attr_t *attr, void *(*start_
 
     wrapper_args->original_routine = start_routine;
     wrapper_args->original_arg = arg;
-    int ret = pthrad_create_cb(thread, attr, thread_trampoline, wrapper_args);
+    int ret = real_pthread_create(thread, attr, thread_trampoline, wrapper_args);
     if (ret != 0) {
         free(wrapper_args);
     }
@@ -96,15 +97,13 @@ int pthread_create(pthread_t *thread, const pthread_attr_t *attr, void *(*start_
 }
 
 pid_t fork(void) {
-    real_fork fork_cb = (real_fork)dlsym(RTLD_NEXT, "fork");
-    
     int sy_pipe[2];
     pipe(sy_pipe);
     
     pid_t p_tgid = getpid();
     pid_t p_pid = gettid();
 
-    pid_t pid = fork_cb();
+    pid_t pid = real_fork();
     if (!pid) {
         close(sy_pipe[0]);
 
@@ -114,9 +113,12 @@ pid_t fork(void) {
             .p_tgid = p_tgid,
         };
 
-        int fd = open("/dev/shadowstack", O_RDWR);
-        ioctl(fd, IOCTL_SHADOW_FORK, &req);
-        close(fd);
+        if (shadow_fd >= 0) {
+            close(shadow_fd); 
+        }
+        shadow_fd = open("/dev/shadowstack", O_RDWR);
+
+        ioctl(shadow_fd, IOCTL_SHADOW_FORK, &req);
 
         char done = '1';
         write(sy_pipe[1], &done, 1);
