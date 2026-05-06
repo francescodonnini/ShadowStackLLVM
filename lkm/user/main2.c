@@ -9,7 +9,7 @@
 
 int main() {
     int fd;
-    struct ioctl_params req = {0};
+    struct ioctl_mem_params req = {0};
     char *shadow_ptr;
     pid_t pid;
 

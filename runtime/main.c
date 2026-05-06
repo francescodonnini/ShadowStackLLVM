@@ -30,7 +30,7 @@ static inline void get_chunk(SSChunk *chunk) {
 } 
 
 __attribute__((constructor))
-void SSInit(void) {
+void shadow_stack_init(void) {
     uint64_t lo, hi;
     if (setup_memory(&lo, &hi, MEM_SIZE)) {
         exit(EXIT_FAILURE);
@@ -47,7 +47,7 @@ void SSInit(void) {
     get_chunk(main_chunk);
 }
 
-void SSThreadInit(void) {
+void shadow_stack_thread_init(void) {
     SSChunk *chunk = MemPoolAlloc();
     if (!chunk) {
         exit(EXIT_FAILURE);
@@ -63,7 +63,7 @@ static inline void put_chunk(SSChunk *chunk) {
 static void *thread_trampoline(void *arg) {
     PThreadWrapperArgs *w_args = (PThreadWrapperArgs *)arg;
     
-    SSThreadInit();
+    shadow_stack_thread_init();
 
     void *(*original_routine)(void *) = w_args->original_routine;
     void *original_data = w_args->original_arg;

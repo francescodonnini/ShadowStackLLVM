@@ -19,6 +19,7 @@ static long check_ioctl_cmd(unsigned int cmd) {
     switch (cmd) {
     case IOCTL_SHADOW_REQ:
     case IOCTL_SHADOW_FREE:
+    case IOCTL_SHADOW_FORK:
         break;
     default:
         return -ENOTTY;
@@ -33,8 +34,8 @@ static long check_ioctl_cmd(unsigned int cmd) {
 }
 
 long chrdev_ioctl(struct file *file, unsigned int cmd, unsigned long arg) {
-    struct ioctl_params __user *user_arg = (struct ioctl_params __user *)arg;
-    struct ioctl_params req;
+    struct ioctl_mem_params __user *user_arg = (struct ioctl_mem_params __user *)arg;
+    struct ioctl_mem_params req;
     unsigned long long addr;
     long err;
 

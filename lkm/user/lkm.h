@@ -4,9 +4,9 @@
 #include <sys/ioctl.h>
 
 #define IOCTL_SHADOW_MAGIC 0xca
-#define IOCTL_SHADOW_REQ   _IOWR(IOCTL_SHADOW_MAGIC, IOCTL_SHADOW_REQ_NO, struct ioctl_params)
-#define IOCTL_SHADOW_FREE  _IOWR(IOCTL_SHADOW_MAGIC, IOCTL_SHADOW_FREE_NO, struct ioctl_params)
-#define IOCTL_SHADOW_TDOWN _IOWR(IOCTL_SHADOW_MAGIC, IOCTL_SHADOW_TDOWN_NO, struct ioctl_params)
+#define IOCTL_SHADOW_REQ   _IOWR(IOCTL_SHADOW_MAGIC, IOCTL_SHADOW_REQ_NO, struct ioctl_mem_params)
+#define IOCTL_SHADOW_FREE  _IOWR(IOCTL_SHADOW_MAGIC, IOCTL_SHADOW_FREE_NO, struct ioctl_mem_params)
+#define IOCTL_SHADOW_TDOWN _IOWR(IOCTL_SHADOW_MAGIC, IOCTL_SHADOW_TDOWN_NO, struct ioctl_mem_params)
 
 enum {
     IOCTL_SHADOW_REQ_NO = 0x70,
@@ -15,7 +15,7 @@ enum {
     IOCTL_SHADOW_MAX_NR
 };
 
-struct ioctl_params { 
+struct ioctl_mem_params { 
     long error;
     unsigned long long addr;
 };

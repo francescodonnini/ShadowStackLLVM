@@ -10,12 +10,13 @@
 #include <sys/syscall.h>
 #include <unistd.h>
 
-typedef int (*RealPThreadCreate)(pthread_t*, const pthread_attr_t*, void* (*)(void*), void*);
+typedef pid_t (*real_fork)(void);
+typedef int (*real_pthread_create)(pthread_t*, const pthread_attr_t*, void* (*)(void*), void*);
 
 typedef struct {
     void *(*original_routine)(void *);
     void *original_arg;
-} PThreadWrapperArgs;
+} pthread_wargs;
 
 extern int shadow_fd;
 static struct ss_chunk *main_thread_chunk = NULL;
@@ -25,7 +26,7 @@ static pthread_once_t key_once = PTHREAD_ONCE_INIT;
 static void ss_dtor(void *arg) {
     struct ss_chunk *chunk = arg;
     if (chunk && shadow_fd >= 0) {
-        struct ioctl_params req = { .error = 0, .addr = (unsigned long long)chunk };
+        struct ioctl_mem_params req = { .error = 0, .addr = (unsigned long long)chunk };
         ioctl(shadow_fd, IOCTL_SHADOW_FREE, &req);
     }
 }
@@ -42,18 +43,18 @@ static inline void get_chunk(struct ss_chunk *chunk) {
 } 
 
 __attribute__((constructor))
-void SSInit(void) {
-    main_thread_chunk = MemPoolAlloc();
+void shadow_stack_init(void) {
+    main_thread_chunk = mem_pool_alloc();
     if (!main_thread_chunk) {
         exit(EXIT_FAILURE);
     }
     get_chunk(main_thread_chunk);
 }
 
-void SSThreadInit(void) {
+void shadow_stack_thread_init(void) {
     pthread_once(&key_once, make_key);
 
-    struct ss_chunk *chunk = MemPoolAlloc();
+    struct ss_chunk *chunk = mem_pool_alloc();
     if (!chunk) {
         exit(EXIT_FAILURE);
     }
@@ -63,9 +64,9 @@ void SSThreadInit(void) {
 }
 
 static void *thread_trampoline(void *arg) {
-    PThreadWrapperArgs *w_args = (PThreadWrapperArgs *)arg;
+    pthread_wargs *w_args = (pthread_wargs *)arg;
     
-    SSThreadInit();
+    shadow_stack_thread_init();
 
     void *(*original_routine)(void *) = w_args->original_routine;
     void *original_data = w_args->original_arg;
@@ -75,21 +76,61 @@ static void *thread_trampoline(void *arg) {
 }
 
 int pthread_create(pthread_t *thread, const pthread_attr_t *attr, void *(*start_routine)(void *), void *arg) {
-    static RealPThreadCreate real_pthread_create = NULL;
-    if (!real_pthread_create) {
-        real_pthread_create = (RealPThreadCreate)dlsym(RTLD_NEXT, "pthread_create");
+    static real_pthread_create pthrad_create_cb = NULL;
+    if (!pthrad_create_cb) {
+        pthrad_create_cb = (real_pthread_create)dlsym(RTLD_NEXT, "pthread_create");
     }
 
-    PThreadWrapperArgs *wrapper_args = malloc(sizeof(PThreadWrapperArgs));
+    pthread_wargs *wrapper_args = malloc(sizeof(pthread_wargs));
     if (!wrapper_args) {
         return -1; 
     }
 
     wrapper_args->original_routine = start_routine;
     wrapper_args->original_arg = arg;
-    int ret = real_pthread_create(thread, attr, thread_trampoline, wrapper_args);
+    int ret = pthrad_create_cb(thread, attr, thread_trampoline, wrapper_args);
     if (ret != 0) {
         free(wrapper_args);
     }
     return ret;
+}
+
+pid_t fork(void) {
+    real_fork fork_cb = (real_fork)dlsym(RTLD_NEXT, "fork");
+    
+    int sy_pipe[2];
+    pipe(sy_pipe);
+    
+    pid_t p_tgid = getpid();
+    pid_t p_pid = gettid();
+
+    pid_t pid = fork_cb();
+    if (!pid) {
+        close(sy_pipe[0]);
+
+        struct ioctl_fork_params req = {
+            .error = 0,
+            .p_pid = p_pid,
+            .p_tgid = p_tgid,
+        };
+
+        int fd = open("/dev/shadowstack", O_RDWR);
+        ioctl(fd, IOCTL_SHADOW_FORK, &req);
+        close(fd);
+
+        char done = '1';
+        write(sy_pipe[1], &done, 1);
+        close(sy_pipe[1]);
+    } else if (pid > 0) {
+        close(sy_pipe[1]);
+
+        char done;
+        read(sy_pipe[0], &done, 1);
+        close(sy_pipe[0]);
+    } else {
+        close(sy_pipe[0]);
+        close(sy_pipe[1]);
+    }
+
+    return pid;
 }

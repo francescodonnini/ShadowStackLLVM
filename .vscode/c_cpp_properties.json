@@ -1,6 +1,17 @@
 {
     "configurations": [
         {
+            "name": "runtime-ubuntu",
+            "includePath": [
+                "${workspaceFolder}/**"
+            ],
+            "defines": [],
+            "compilerPath": "/usr/bin/gcc", 
+            "cStandard": "c17",
+            "cppStandard": "c++17",
+            "intelliSenseMode": "linux-gcc-x64"
+        },
+        {
             "name": "lkm-ubuntu",
             "includePath": [
                 "${workspaceFolder}/**",
@@ -9,9 +20,9 @@
                 "/usr/src/linux-headers-5.15.0-139-generic/arch/x86/include/generated",
                 "/usr/src/linux-headers-5.15.0-139-generic/include/generated",
                 "/usr/src/linux-headers-5.15.0-139-generic/include/uapi",
-    "/usr/src/linux-headers-5.15.0-139-generic/include/generated/uapi",
-    "/usr/src/linux-headers-5.15.0-139-generic/arch/x86/include/uapi",
-    "/usr/src/linux-headers-5.15.0-139-generic/arch/x86/include/generated/uapi",
+                "/usr/src/linux-headers-5.15.0-139-generic/include/generated/uapi",
+                "/usr/src/linux-headers-5.15.0-139-generic/arch/x86/include/uapi",
+                "/usr/src/linux-headers-5.15.0-139-generic/arch/x86/include/generated/uapi",
                 "/usr/lib/gcc/x86_64-linux-gnu/*/include"
             ],
             "defines": [

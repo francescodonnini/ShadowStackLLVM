@@ -7,6 +7,8 @@ long sa_alloc(uint64_t *vaddr);
 
 long sa_free(uint64_t usr_addr);
 
+long sa_fork(pid_t p_tgid, pid_t p_pid);
+
 long sa_tdown(struct mm_struct *mm);
 
 long resolve_symbols(void);

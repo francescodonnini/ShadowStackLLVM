@@ -16,7 +16,7 @@ int fd;
 // The worker function for each thread
 void* worker_thread(void* arg) {
     long thread_id = (long)arg;
-    struct ioctl_params req = { .error = 0, .addr = 0 };
+    struct ioctl_mem_params req = { .error = 0, .addr = 0 };
 
     // 1. Each thread independently requests an address
     if (ioctl(fd, IOCTL_SHADOW_REQ, &req) < 0) {

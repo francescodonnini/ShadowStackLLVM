@@ -43,14 +43,14 @@ struct sa_free_vaddr_desc {
 struct sa_allocator_desc {
     pid_t            tgid;
     atomic64_t       free_area;
-    spinlock_t       fl_lock;
+    spinlock_t       lock;
     struct list_head active_list;
     struct list_head free_list;
     struct list_head list;
 };
 
 static LIST_HEAD(sa_list);
-static DEFINE_SPINLOCK(sa_lock);
+static DEFINE_MUTEX(sa_lock);
 
 static void *gl_vmalloc(void) {
     struct gl_vma_desc *desc;
@@ -142,25 +142,25 @@ static uint64_t vmalloc_to_phy(void *addr) {
 }
 
 static void alloc_add_t(struct sa_allocator_desc *alloc, struct sa_thread_desc *t) {
-    spin_lock(&alloc->fl_lock);
+    spin_lock(&alloc->lock);
     list_add(&t->list, &alloc->active_list);
-    spin_unlock(&alloc->fl_lock);
+    spin_unlock(&alloc->lock);
 }
 
-static uint64_t alloc_get_vaddr(struct sa_allocator_desc *alloc) {
+static uint64_t alloc_get_free_vaddr(struct sa_allocator_desc *alloc) {
     struct sa_free_vaddr_desc *desc;
     uint64_t vaddr;
 
-    spin_lock(&alloc->fl_lock);
+    spin_lock(&alloc->lock);
     desc = list_first_entry_or_null(&alloc->free_list, struct sa_free_vaddr_desc, list);
     if (desc) {
         vaddr = desc->vaddr;
         list_del(&desc->list);
-        spin_unlock(&alloc->fl_lock);
+        spin_unlock(&alloc->lock);
         kfree(desc);
         return vaddr;            
     }
-    spin_unlock(&alloc->fl_lock);
+    spin_unlock(&alloc->lock);
 
     return atomic64_fetch_add(SS_SIZE, &alloc->free_area);
 }
@@ -173,14 +173,14 @@ static struct sa_allocator_desc* alloc_get_or_creat(pid_t tgid) {
     new_alloc = kmalloc(sizeof(*alloc), GFP_KERNEL);
     if (new_alloc) {
         new_alloc->tgid = tgid;
-        spin_lock_init(&new_alloc->fl_lock);
+        spin_lock_init(&new_alloc->lock);
         atomic64_set(&new_alloc->free_area, SS_START);
         INIT_LIST_HEAD(&new_alloc->free_list);
         INIT_LIST_HEAD(&new_alloc->active_list);
     }
 
     alloc = NULL;
-    spin_lock(&sa_lock);
+    mutex_lock(&sa_lock);
     list_for_each_entry_rcu(it, &sa_list, list) {
         if (it->tgid == tgid) {
             alloc = it;
@@ -189,7 +189,7 @@ static struct sa_allocator_desc* alloc_get_or_creat(pid_t tgid) {
     }
     if (!alloc) {
         if (!new_alloc) {
-            spin_unlock(&sa_lock);
+            mutex_unlock(&sa_lock);
             return NULL;
         }
         list_add_rcu(&new_alloc->list, &sa_list);
@@ -197,7 +197,7 @@ static struct sa_allocator_desc* alloc_get_or_creat(pid_t tgid) {
     } else {
         kfree(new_alloc);
     }
-    spin_unlock(&sa_lock);
+    mutex_unlock(&sa_lock);
 
     return alloc;
 }
@@ -209,9 +209,9 @@ static void alloc_add_vaddr(struct sa_allocator_desc *alloc, uint64_t vaddr) {
 
     desc->vaddr = vaddr;
 
-    spin_lock(&alloc->fl_lock);
+    spin_lock(&alloc->lock);
     list_add(&desc->list, &alloc->free_list);
-    spin_unlock(&alloc->fl_lock);
+    spin_unlock(&alloc->lock);
 }
 
 static void unmap_ss_page(struct mm_struct *mm, uint64_t vaddr) {
@@ -263,7 +263,7 @@ long sa_alloc(uint64_t *vaddr) {
         goto no_allocator;
     }
 
-    usr_addr = alloc_get_vaddr(allocator);
+    usr_addr = alloc_get_free_vaddr(allocator);
     if (usr_addr >= SS_END) {
         err = -ENOMEM;
         goto no_usr_addr;
@@ -325,7 +325,7 @@ long sa_free(uint64_t usr_addr){
     alloc = alloc_get_or_creat(current->tgid);
     if (!alloc) return -EINVAL;
 
-    spin_lock(&alloc->fl_lock);
+    spin_lock(&alloc->lock);
     list_for_each_entry_safe(t_desc, tmp, &alloc->active_list, list) {
         if (t_desc->usr_addr == usr_addr) {
             list_del(&t_desc->list);
@@ -333,7 +333,7 @@ long sa_free(uint64_t usr_addr){
             break;
         }
     }
-    spin_unlock(&alloc->fl_lock);
+    spin_unlock(&alloc->lock);
 
     if (!found) return -EINVAL;
 
@@ -497,9 +497,124 @@ static void sa_remove(struct mm_struct *mm, unsigned long start, unsigned long e
 }
 
 long sa_tdown(struct mm_struct *mm) {
+    struct sa_allocator_desc *alloc;
+
+    mutex_lock(&sa_lock);
+
+    list_for_each_entry(alloc, &sa_list, list) {
+        if (alloc->tgid == current->tgid) {
+            list_del(&alloc->list);
+            break;
+        }
+    }
+
+    mutex_unlock(&sa_lock);
+
     mmap_write_lock(mm);
     sa_remove(mm, SS_START, SS_END);
     my_flush_tlb_mm(mm);
     mmap_write_unlock(mm);
     return 0;
+}
+
+static bool get_kaddr(pid_t p_tgid, pid_t p_pid, struct sa_thread_desc *chld_desc, uint64_t *free_area) {
+    struct sa_allocator_desc *alloc;
+    struct sa_thread_desc *t_desc;
+    bool found;
+
+    found = false;
+    list_for_each_entry_rcu(alloc, &sa_list, list) {
+        if (alloc->tgid == p_tgid) {
+            spin_lock(&alloc->lock);
+            list_for_each_entry(t_desc, &alloc->active_list, list) {
+                if (t_desc->tid == p_pid) {
+                    found = true;
+                    break;
+                }
+            }
+            spin_unlock(&alloc->lock);
+            break;
+        }
+    }
+
+    if (found) {
+        chld_desc->kernel_addr = t_desc->kernel_addr;
+        chld_desc->usr_addr = t_desc->usr_addr;
+        *free_area = atomic64_read(&alloc->free_area);
+    }
+    return found;
+}
+
+long sa_fork_init(pid_t p_tgid, pid_t p_pid) {
+    struct mm_struct *child_mm;
+    struct sa_thread_desc *t_desc;
+    struct sa_allocator_desc *c_alloc;
+    uint64_t free_area;
+    void *c_stack;
+    bool found;
+    long err;
+    unsigned long offset;
+
+    child_mm = current->mm;
+    if (!child_mm) return -EINVAL;
+
+    t_desc = kmalloc(sizeof(*t_desc), GFP_KERNEL);
+    if (!t_desc) return -ENOMEM;
+
+    c_alloc = alloc_get_or_creat(current->tgid);
+    if (!c_alloc) {
+        err = -ENOMEM;
+        goto no_alloc;
+    }
+
+    c_stack = gl_vmalloc();
+    if (!c_stack) {
+        err = -ENOMEM;
+        goto no_vmalloc;
+    }
+
+    mutex_lock(&sa_lock);
+
+    found = get_kaddr(p_tgid, p_pid, t_desc, &free_area);
+    if (!found) {
+        err = -ENOENT;
+        goto no_parent;
+    }
+
+    atomic64_set(&c_alloc->free_area, free_area);
+    t_desc->tid = current->pid;
+    memcpy(c_stack, t_desc->kernel_addr, SS_SIZE);
+    t_desc->kernel_addr = c_stack;
+
+    mutex_unlock(&sa_lock);
+
+    mmap_write_lock(child_mm);
+    for (offset = 0; offset < SS_SIZE; offset += PAGE_SIZE) {
+        phys_addr_t phy = vmalloc_to_phy(t_desc->kernel_addr + offset);
+
+        err = map_ss(child_mm, t_desc->usr_addr + offset, phy);
+        if (err) {
+            unsigned long rollback_off;
+            for (rollback_off = 0; rollback_off < offset; rollback_off += PAGE_SIZE) {
+                unmap_ss_page(child_mm, t_desc->usr_addr + rollback_off);
+            }
+            my_flush_tlb_mm(child_mm);
+            mmap_write_unlock(child_mm);
+
+            err = -ENOMEM;
+            goto no_map;
+        }
+    }
+    mmap_write_unlock(child_mm);
+
+    return 0;
+
+no_map:
+no_parent:
+    kfree(c_stack);
+no_vmalloc:
+    kfree(c_alloc);
+no_alloc:
+    kfree(t_desc);
+    return err;
 }
