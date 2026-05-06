@@ -406,7 +406,6 @@ static void sa_free_p4d(struct mm_struct *mm, p4d_t *p4d_start, pgd_t *pgd) {
             return;
     }
 
-    mm_dec_nr_p4ds(mm);
     p4d_free(mm, (p4d_t*)page_to_virt(pgd_page(*pgd)));
     pgd_clear(pgd);
 }
