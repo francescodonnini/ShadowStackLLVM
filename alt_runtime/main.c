@@ -10,6 +10,8 @@
 #include <sys/syscall.h>
 #include <unistd.h>
 
+static int shadow_fd;
+
 typedef pid_t (*real_fork_t)(void);
 typedef int   (*real_pthread_create_t)(pthread_t*, const pthread_attr_t*, void* (*)(void*), void*);
 
@@ -21,7 +23,6 @@ typedef struct {
     void *original_arg;
 } pthread_wargs;
 
-extern int shadow_fd;
 static struct ss_chunk *main_thread_chunk = NULL;
 static pthread_key_t ss_cleanup_key;
 static pthread_once_t key_once = PTHREAD_ONCE_INIT;
@@ -49,6 +50,12 @@ __attribute__((constructor))
 void shadow_stack_init(void) {
     real_fork = (real_fork_t)dlsym(RTLD_NEXT, "fork");
     real_pthread_create = (real_pthread_create_t)dlsym(RTLD_NEXT, "pthread_create");
+
+    shadow_fd = open("/dev/shadowstack", O_RDWR);
+    if (shadow_fd < 0) {
+        perror("cannot open shadowstack device");
+        exit(EXIT_FAILURE;)
+    }
 
     main_thread_chunk = mem_pool_alloc();
     if (!main_thread_chunk) {

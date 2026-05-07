@@ -1,17 +1,10 @@
 #include "api.h"
 #include "pt_bindings.h"
-#include <asm/cpufeature.h>
-#include <asm/pgalloc.h>
-#include <asm/pgtable_types.h>
-#include <asm/tlbflush.h>
 #include <linux/atomic.h>
 #include <linux/io.h>
-#include <linux/kprobes.h>
+#include <linux/kref.h>
 #include <linux/list.h>
 #include <linux/mm.h>
-#include <linux/mmap_lock.h>
-#include <linux/mutex.h>
-#include <linux/pgtable.h>
 #include <linux/printk.h>
 #include <linux/rwsem.h>
 #include <linux/slab.h>
@@ -19,9 +12,6 @@
 #include <linux/vmalloc.h>
 #include <linux/xarray.h>
 #define VMA_CAPACITY (128)
-#define SS_START     (0xffffeb0000000000ULL)
-#define SS_END       (0xfffffc0000000000ULL)
-#define SS_SIZE      (1024 * 1024)
 
 struct gl_vma_desc {
     void             *kernel_addr;
@@ -39,18 +29,15 @@ struct sa_thread_desc {
     struct list_head   list;
 };
 
-struct sa_free_vaddr_desc {
-    uint64_t         vaddr;
-    struct list_head list;
-};
-
 struct sa_allocator_desc {
-    pid_t               tgid;
-    atomic64_t          free_area;
-    struct rw_semaphore al_lock;
-    struct list_head    active_list;
-    spinlock_t          fl_lock;
-    struct list_head    free_list;
+    pid_t                tgid;
+    struct mm_struct    *mm;
+    atomic64_t           free_area;
+    struct rw_semaphore  al_lock;
+    struct list_head     active_list;
+    spinlock_t           fl_lock;
+    struct list_head     free_list;
+    struct kref          kref;
 };
 
 static DEFINE_XARRAY(sa_allocators);
@@ -157,13 +144,13 @@ static void alloc_add_t(struct sa_allocator_desc *alloc, struct sa_thread_desc *
 }
 
 static uint64_t alloc_get_free_vaddr(struct sa_allocator_desc *alloc) {
-    struct sa_free_vaddr_desc *desc;
+    struct sa_thread_desc *desc;
     uint64_t vaddr;
 
     spin_lock(&alloc->fl_lock);
-    desc = list_first_entry_or_null(&alloc->free_list, struct sa_free_vaddr_desc, list);
+    desc = list_first_entry_or_null(&alloc->free_list, struct sa_thread_desc, list);
     if (desc) {
-        vaddr = desc->vaddr;
+        vaddr = desc->usr_addr;
         list_del(&desc->list);
         spin_unlock(&alloc->fl_lock);
         kfree(desc);
@@ -174,43 +161,9 @@ static uint64_t alloc_get_free_vaddr(struct sa_allocator_desc *alloc) {
     return atomic64_fetch_add(SS_SIZE, &alloc->free_area);
 }
 
-static struct sa_allocator_desc* alloc_get_or_creat(pid_t tgid) {
-    struct sa_allocator_desc *alloc;
-    long err;
-
-    alloc = xa_load(&sa_allocators, tgid);
-    if (alloc) return alloc;
-
-    alloc = kmalloc(sizeof(*alloc), GFP_KERNEL);
-    if (alloc) {
-        alloc->tgid = tgid;
-        init_rwsem(&alloc->al_lock);
-        spin_lock_init(&alloc->fl_lock);
-        atomic64_set(&alloc->free_area, SS_START);
-        INIT_LIST_HEAD(&alloc->free_list);
-        INIT_LIST_HEAD(&alloc->active_list);
-    }
-
-    err = xa_insert(&sa_allocators, tgid, alloc, GFP_KERNEL);
-    if (err == -EBUSY) {
-        kfree(alloc);
-        return xa_load(&sa_allocators, tgid);
-    } else if (err) {
-        kfree(alloc);
-        return NULL;
-    }
-
-    return alloc;
-}
-
-static void freelist_add(struct sa_allocator_desc *alloc, uint64_t vaddr) {
-    struct sa_free_vaddr_desc *desc;
-    desc = kmalloc(sizeof(*desc), GFP_KERNEL);
-    if (!desc) return;
-
-    desc->vaddr = vaddr;
+static void alloc_freelist_add(struct sa_allocator_desc *alloc, struct list_head *list) {
     spin_lock(&alloc->fl_lock);
-    list_add(&desc->list, &alloc->free_list);
+    list_add(list, &alloc->free_list);
     spin_unlock(&alloc->fl_lock);
 }
 
@@ -242,9 +195,83 @@ static void unmap_ss_page(struct mm_struct *mm, uint64_t vaddr) {
     pte_unmap_unlock(ptep, ptl);
 }
 
+static void alloc_destroy_callback(struct kref *kref) {
+    struct sa_allocator_desc *alloc;
+    struct sa_thread_desc *t_desc;
+    struct sa_thread_desc *t_tmp;
+    
+    alloc = container_of(kref, struct sa_allocator_desc, kref);
+
+    list_for_each_entry_safe(t_desc, t_tmp, &alloc->active_list, list) {
+        list_del(&t_desc->list);
+        gl_free(t_desc->kernel_addr); 
+        kfree(t_desc);
+    }
+
+    list_for_each_entry_safe(t_desc, t_tmp, &alloc->free_list, list) {
+        list_del(&t_desc->list);
+        kfree(t_desc);
+    }
+
+    kfree(alloc);
+}
+
+static void alloc_put(struct sa_allocator_desc *alloc) {
+    kref_put(&alloc->kref, alloc_destroy_callback);
+}
+
+struct sa_allocator_desc* alloc_create(pid_t tgid, struct mm_struct *mm) {
+    struct sa_allocator_desc *alloc;
+    long err;
+
+    alloc = kmalloc(sizeof(*alloc), GFP_KERNEL);
+    if (!alloc) return NULL;
+
+    alloc->tgid = tgid;
+    alloc->mm = mm;
+    init_rwsem(&alloc->al_lock);
+    spin_lock_init(&alloc->fl_lock);
+    atomic64_set(&alloc->free_area, SS_START);
+    INIT_LIST_HEAD(&alloc->free_list);
+    INIT_LIST_HEAD(&alloc->active_list);
+    kref_init(&alloc->kref);
+
+    err = xa_insert(&sa_allocators, tgid, alloc, GFP_KERNEL);
+    if (err) {
+        kfree(alloc);
+        if (err == -EBUSY) {
+            pr_err("Allocator for TGID %d does already exists", tgid);
+        }
+        return NULL;
+    }
+
+    kref_get(&alloc->kref);
+    return alloc;
+}
+
+void alloc_destroy(struct sa_allocator_desc *alloc) {
+    if (!alloc) return;
+
+    xa_erase(&sa_allocators, alloc->tgid);
+    alloc_put(alloc);
+}
+
+static struct sa_allocator_desc *alloc_get(pid_t tgid) {
+    struct sa_allocator_desc *alloc;
+
+    rcu_read_lock();
+    alloc = xa_load(&sa_allocators, tgid);
+    if (alloc && kref_get_unless_zero(&alloc->kref)) {
+        rcu_read_unlock();
+        return alloc;
+    }
+    rcu_read_unlock();
+    return NULL;
+}
+
 long sa_alloc(uint64_t *vaddr) {
     struct sa_thread_desc *t_desc;
-    struct sa_allocator_desc *allocator;
+    struct sa_allocator_desc *alloc;
     long err;
     uint64_t usr_addr;
     void *kernel_addr;
@@ -257,24 +284,23 @@ long sa_alloc(uint64_t *vaddr) {
     t_desc = kmalloc(sizeof(*t_desc), GFP_KERNEL);
     if (!t_desc) return -ENOMEM;
 
-    rcu_read_lock();
-    allocator = alloc_get_or_creat(current->tgid);
-    if (!allocator) {
-        rcu_read_unlock();
-        err = -ENOMEM;
-        goto no_allocator;
+    alloc = alloc_get(current->tgid);
+    if (!alloc) {
+        kfree(t_desc);
+        return -ENOMEM;
     }
 
-    usr_addr = alloc_get_free_vaddr(allocator);
+    usr_addr = alloc_get_free_vaddr(alloc);
     if (usr_addr >= SS_END) {
-        err = -ENOMEM;
-        goto no_usr_addr;
+        alloc_put(alloc);
+        return -ENOMEM;
     }
 
     kernel_addr = gl_vmalloc();
     if (!kernel_addr) {
-        err = -ENOMEM;
-        goto no_gl_vmalloc;
+        kfree(t_desc);
+        alloc_put(alloc);
+        return -ENOMEM;
     }
 
     mmap_write_lock(mm);
@@ -290,8 +316,9 @@ long sa_alloc(uint64_t *vaddr) {
             my_flush_tlb_mm(mm);
             mmap_write_unlock(mm);
 
-            err = -ENOMEM;
-            goto no_map;
+            alloc_freelist_add(alloc, &t_desc->list);
+            alloc_put(alloc);
+            return -ENOMEM;
         }
     }
     mmap_write_unlock(mm);
@@ -300,19 +327,10 @@ long sa_alloc(uint64_t *vaddr) {
     t_desc->usr_addr = usr_addr;
     t_desc->kernel_addr = kernel_addr;
 
-    alloc_add_t(allocator, t_desc);
+    alloc_add_t(alloc, t_desc);
     *vaddr = usr_addr;
 
     return 0;
-
-no_map:
-    gl_free(kernel_addr);
-no_gl_vmalloc:
-    freelist_add(allocator, usr_addr);
-no_usr_addr:
-no_allocator:
-    kfree(t_desc);
-    return err;
 }
 
 long sa_free(uint64_t usr_addr){
@@ -324,7 +342,7 @@ long sa_free(uint64_t usr_addr){
 
     if (!mm) return -EINVAL;
 
-    alloc = alloc_get_or_creat(current->tgid);
+    alloc = alloc_get(current->tgid);
     if (!alloc) return -EINVAL;
 
     down_write(&alloc->al_lock);
@@ -337,7 +355,10 @@ long sa_free(uint64_t usr_addr){
     }
     up_write(&alloc->al_lock);
 
-    if (!found) return -EINVAL;
+    if (!found) {
+        alloc_put(alloc);
+        return -EINVAL;
+    }
 
     mmap_write_lock(mm);
     for (offset = 0; offset < SS_SIZE; offset += PAGE_SIZE) {
@@ -347,196 +368,23 @@ long sa_free(uint64_t usr_addr){
     mmap_write_unlock(mm);
 
     gl_free(t_desc->kernel_addr);
-    freelist_add(alloc, usr_addr);
+    alloc_freelist_add(alloc, &t_desc->list);
     kfree(t_desc);
+    alloc_put(alloc);
 
     return 0;
 }
 
-static void sa_free_pte(struct mm_struct *mm, pte_t *pte_start, pmd_t *pmd) {
-    pte_t *pte;
-    int i;
-
-    for (i = 0; i < PTRS_PER_PTE; i++) {
-        pte = pte_start + i;
-        if (!pte_none(ptep_get(pte)))
-            return;
-    }
-
-    mm_dec_nr_ptes(mm);
-    pte_free(mm, pmd_page(*pmd));
-    pmd_clear(pmd);
-} 
-
-static void sa_free_pmd(struct mm_struct *mm, pmd_t *pmd_start, pud_t *pud) {
-    pmd_t *pmd;
-    int i;
-
-    for (i = 0; i < PTRS_PER_PMD; i++) {
-        pmd = pmd_start + i;
-        if (!pmd_none(*pmd))
-            return;
-    }
-
-    mm_dec_nr_pmds(mm);
-    pmd_free(mm, (pmd_t*)page_to_virt(pud_page(*pud)));
-    pud_clear(pud);
-} 
-
-static void sa_free_pud(struct mm_struct *mm, pud_t *pud_start, p4d_t *p4d) {
-    pud_t *pud;
-    int i;
-
-    for (i = 0; i < PTRS_PER_PUD; i++) {
-        pud = pud_start + i;
-        if (!pud_none(*pud))
-            return;
-    }
-
-    mm_dec_nr_puds(mm);
-    pud_free(mm, (pud_t*)page_to_virt(p4d_page(*p4d)));
-    p4d_clear(p4d);
-}
-
-static void sa_free_p4d(struct mm_struct *mm, p4d_t *p4d_start, pgd_t *pgd) {
-    p4d_t *p4d;
-    int i;
-
-    for (i = 0; i < PTRS_PER_P4D; i++) {
-        p4d = p4d_start + i;
-        if (!p4d_none(*p4d))
-            return;
-    }
-
-    p4d_free(mm, (p4d_t*)page_to_virt(pgd_page(*pgd)));
-    pgd_clear(pgd);
-}
-
-static void sa_remove_pte(struct mm_struct *mm, pte_t *pte, unsigned long addr, unsigned long end) {
-    unsigned long next;
-    pte_t ptent;
-
-    for (; addr < end; addr = next, pte++) {
-        next = (addr + PAGE_SIZE) & PAGE_MASK;
-        if (next > end)
-            next = end;
-        
-        ptent = ptep_get(pte);
-        if (!pte_present(ptent))
-            continue;
-        
-        pte_clear(mm, addr, pte);
-    }
-}
-
-static void sa_remove_pmd(struct mm_struct *mm, pmd_t *pmd, unsigned long addr, unsigned long end) {
-    unsigned long next;
-
-    for (; addr < end; addr = next, pmd++) {
-        pte_t *pte;
-
-        next = pmd_addr_end(addr, end);
-        if (!pmd_present(*pmd))
-            continue;
-
-        pte = pte_offset_kernel(pmd, addr);
-        sa_remove_pte(mm, pte, addr, next);
-        sa_free_pte(mm, pte_offset_kernel(pmd, 0), pmd);
-    }
-}
-
-static void sa_remove_pud(struct mm_struct *mm, pud_t *pud, unsigned long addr, unsigned long end) {
-    unsigned long next;
-
-    for (; addr < end; addr = next, pud++) {
-        pmd_t *pmd;
-        pmd_t *pmd_base;
-
-        next = pud_addr_end(addr, end);
-        if (!pud_present(*pud))
-            continue;
-
-        pmd = pmd_offset(pud, addr);
-        pmd_base = pmd_offset(pud, 0);
-        sa_remove_pmd(mm, pmd, addr, next);
-        sa_free_pmd(mm, pmd_base, pud);
-    }
-}
-
-static void sa_remove_p4d(struct mm_struct *mm, p4d_t *p4d, unsigned long addr, unsigned long end) {
-    unsigned long next;
-
-    for (; addr < end; addr = next, p4d++) {
-        pud_t *pud;
-
-        next = p4d_addr_end(addr, end);
-        if (!p4d_present(*p4d))
-            continue;
-
-        pud = pud_offset(p4d, addr);
-        sa_remove_pud(mm, pud, addr, next);
-        sa_free_pud(mm, pud_offset(p4d, 0), p4d);
-    }
-}
-
-static void sa_remove(struct mm_struct *mm, unsigned long start, unsigned long end) {
-    unsigned long addr;
-    unsigned long next;
-    pgd_t *pgd;
-
-    for (addr = start; addr < end; addr = next) {
-        p4d_t *p4d;
-
-        next = pgd_addr_end(addr, end);
-        pgd = pgd_offset(mm, addr);
-        if (!pgd_present(*pgd))
-            continue;
-
-        p4d = p4d_offset(pgd, addr);
-        sa_remove_p4d(mm, p4d, addr, next);
-        sa_free_p4d(mm, p4d_offset(pgd, 0), pgd);
-    }
-}
-
-long sa_tdown(struct mm_struct *mm) {
-    struct sa_allocator_desc *alloc;
-    struct sa_thread_desc *t_desc, *t_tmp;
-    struct sa_free_vaddr_desc *f_desc, *f_tmp;
-
-    alloc = xa_erase(&sa_allocators, current->tgid);
-    if (alloc) {
-        down_write(&alloc->al_lock);        
-        list_for_each_entry_safe(t_desc, t_tmp, &alloc->active_list, list) {
-            list_del(&t_desc->list);
-            gl_free(t_desc->kernel_addr); 
-            kfree(t_desc);
-        }
-        up_write(&alloc->al_lock);
-
-        spin_lock(&alloc->fl_lock);
-        list_for_each_entry_safe(f_desc, f_tmp, &alloc->free_list, list) {
-            list_del(&f_desc->list);
-            kfree(f_desc);
-        }
-        spin_unlock(&alloc->fl_lock);
-
-        kfree(alloc);
-    }
-
-    mmap_write_lock(mm);
-    sa_remove(mm, SS_START, SS_END);
-    my_flush_tlb_mm(mm);
-    mmap_write_unlock(mm);
-    
-    return 0;
-}
-
-static long sa_copy(pid_t p_tgid, pid_t p_pid, struct sa_allocator_desc *c_alloc, struct sa_thread_desc *c_t) {
+static long sa_copy(
+    pid_t p_tgid,
+    pid_t p_pid,
+    struct sa_allocator_desc *c_alloc,
+    struct sa_thread_desc *c_t) {
     struct sa_allocator_desc *alloc;
     struct sa_thread_desc *t_it;
     bool found;
 
-    alloc = xa_load(&sa_allocators, p_tgid);
+    alloc = alloc_get(p_tgid);
     if (!alloc) {
         return -ENOENT;
     }
@@ -553,11 +401,13 @@ static long sa_copy(pid_t p_tgid, pid_t p_pid, struct sa_allocator_desc *c_alloc
     }
     up_read(&alloc->al_lock);
 
-    if (!found) return -ENOENT;
-
+    alloc_put(alloc);
+    if (!found) {
+        return -ENOENT;
+    }
     atomic64_set(&c_alloc->free_area, c_t->usr_addr);
     alloc_add_t(c_alloc, c_t);
-    
+
     return 0;
 }
 
@@ -575,7 +425,7 @@ long sa_fork(pid_t p_tgid, pid_t p_pid) {
     t_desc = kmalloc(sizeof(*t_desc), GFP_KERNEL);
     if (!t_desc) return -ENOMEM;
 
-    c_alloc = alloc_get_or_creat(current->tgid);
+    c_alloc = alloc_get(current->tgid);
     if (!c_alloc) {
         err = -ENOMEM;
         goto no_alloc;
@@ -613,7 +463,6 @@ long sa_fork(pid_t p_tgid, pid_t p_pid) {
         }
     }
     mmap_write_unlock(child_mm);
-
     return 0;
 
 no_map:
@@ -623,6 +472,7 @@ no_map:
 no_parent:
     gl_free(c_stack);
 no_vmalloc:
+    alloc_put(c_alloc);
 no_alloc:
     kfree(t_desc);
     return err;
