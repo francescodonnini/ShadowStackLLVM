@@ -393,7 +393,7 @@ static long sa_copy(
     if (!found) {
         return -ENOENT;
     }
-    atomic64_set(&c_alloc->free_area, c_t->usr_addr);
+    atomic64_set(&c_alloc->free_area, c_t->usr_addr + SS_SIZE);
     alloc_add_t(c_alloc, c_t);
 
     return 0;
