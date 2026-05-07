@@ -54,7 +54,7 @@ void shadow_stack_init(void) {
     shadow_fd = open("/dev/shadowstack", O_RDWR);
     if (shadow_fd < 0) {
         perror("cannot open shadowstack device");
-        exit(EXIT_FAILURE;)
+        exit(EXIT_FAILURE);
     }
 
     main_thread_chunk = mem_pool_alloc();
