@@ -319,6 +319,8 @@ long sa_alloc(uint64_t *vaddr) {
     alloc_add_t(alloc, t_desc);
     *vaddr = usr_addr;
 
+    my_flush_tlb_mm(mm);
+
     return 0;
 }
 
@@ -451,6 +453,9 @@ long sa_fork(pid_t p_tgid, pid_t p_pid) {
         }
     }
     mmap_write_unlock(child_mm);
+
+    my_flush_tlb_mm(child_mm);
+
     return 0;
 
 no_map:
@@ -467,7 +472,7 @@ no_alloc:
 }
 
 void vma_free(void) {
-    struct list_head old_list;
+    LIST_HEAD(old_list);
     struct gl_vma_desc *it;
     struct gl_vma_desc *tmp;
 
