@@ -1,12 +1,8 @@
 #include "api.h"
 #include "pt_bindings.h"
-#include <linux/atomic.h>
 #include <linux/io.h>
-#include <linux/kref.h>
-#include <linux/list.h>
 #include <linux/mm.h>
 #include <linux/printk.h>
-#include <linux/rwsem.h>
 #include <linux/slab.h>
 #include <linux/string.h>
 #include <linux/vmalloc.h>
@@ -27,17 +23,6 @@ struct sa_thread_desc {
     uint64_t           usr_addr;
     void              *kernel_addr;
     struct list_head   list;
-};
-
-struct sa_allocator_desc {
-    pid_t                tgid;
-    struct mm_struct    *mm;
-    atomic64_t           free_area;
-    struct rw_semaphore  al_lock;
-    struct list_head     active_list;
-    spinlock_t           fl_lock;
-    struct list_head     free_list;
-    struct kref          kref;
 };
 
 static DEFINE_XARRAY(sa_allocators);
@@ -211,6 +196,10 @@ static void alloc_destroy_callback(struct kref *kref) {
     list_for_each_entry_safe(t_desc, t_tmp, &alloc->free_list, list) {
         list_del(&t_desc->list);
         kfree(t_desc);
+    }
+
+    if (alloc->mm) {
+        mmdrop(alloc->mm);
     }
 
     kfree(alloc);

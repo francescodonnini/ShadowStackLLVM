@@ -4,7 +4,6 @@
 #include <asm/pgalloc.h>
 #include <linux/mmap_lock.h>
 #include <linux/sched.h>
-#include <linux/sched/mm.h>
 
 int shadow_open(struct inode *inode, struct file *file) {
     struct mm_struct *mm;
@@ -182,9 +181,10 @@ int shadow_release(struct inode *inode, struct file *file) {
     alloc = file->private_data;
     if (!alloc) return 0;
 
+    mm = alloc->mm;
     if (mm && mmget_not_zero(mm)) {
         sa_tdown(mm);
-        mmdrop(mm);
+        mmput(mm);
     }
 
     alloc_destroy(alloc);

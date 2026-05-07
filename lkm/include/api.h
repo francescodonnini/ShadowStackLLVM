@@ -1,10 +1,27 @@
 #ifndef LKM_API_H
 #define LKM_API_H
+#include <linux/atomic.h>
+#include <linux/kref.h>
+#include <linux/list.h>
 #include <linux/mm_types.h>
+#include <linux/rwsem.h>
+#include <linux/sched/mm.h>
+#include <linux/spinlock.h>
 #include <linux/types.h>
 #define SS_START     (0xffffeb0000000000ULL)
 #define SS_END       (0xfffffc0000000000ULL)
 #define SS_SIZE      (1024 * 1024)
+
+struct sa_allocator_desc {
+    pid_t                tgid;
+    struct mm_struct    *mm;
+    atomic64_t           free_area;
+    struct rw_semaphore  al_lock;
+    struct list_head     active_list;
+    spinlock_t           fl_lock;
+    struct list_head     free_list;
+    struct kref          kref;
+};
 
 struct sa_allocator_desc* alloc_create(pid_t tgid, struct mm_struct *mm);
 
