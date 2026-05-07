@@ -18,15 +18,17 @@
 #include <linux/string.h>
 #include <linux/vmalloc.h>
 #include <linux/xarray.h>
-#define SS_START (0xffffeb0000000000ULL)
-#define SS_END   (0xfffffc0000000000ULL)
-#define SS_SIZE  (1024 * 1024)
+#define VMA_CAPACITY (128)
+#define SS_START     (0xffffeb0000000000ULL)
+#define SS_END       (0xfffffc0000000000ULL)
+#define SS_SIZE      (1024 * 1024)
 
 struct gl_vma_desc {
     void             *kernel_addr;
     struct list_head  list;
 };
 
+static int global_vma_list_size = 0;
 static LIST_HEAD(global_vma_list);
 static DEFINE_SPINLOCK(global_vma_lock);
 
@@ -60,6 +62,7 @@ static void *gl_vmalloc(void) {
     spin_lock(&global_vma_lock);
     desc = list_first_entry_or_null(&global_vma_list, struct gl_vma_desc, list);
     if (desc) {
+        global_vma_list_size--;
         list_del(&desc->list);
         spin_unlock(&global_vma_lock);
 
@@ -77,6 +80,10 @@ static void *gl_vmalloc(void) {
 static void gl_free(void *kaddr) {
     struct gl_vma_desc *desc;
 
+    if (global_vma_list_size >= VMA_CAPACITY) {
+        vfree(kaddr);
+        return;
+    }
     desc = kmalloc(sizeof(*desc), GFP_KERNEL);
     if (!desc) {
         vfree(kaddr);
@@ -84,6 +91,7 @@ static void gl_free(void *kaddr) {
     }
     desc->kernel_addr = kaddr;
     spin_lock(&global_vma_lock);
+    global_vma_list_size++;
     list_add(&desc->list, &global_vma_list);
     spin_unlock(&global_vma_lock);
 }
@@ -184,7 +192,7 @@ static struct sa_allocator_desc* alloc_get_or_creat(pid_t tgid) {
     }
 
     err = xa_insert(&sa_allocators, tgid, alloc, GFP_KERNEL);
-    if (err == -EEXIST) {
+    if (err == -EBUSY) {
         kfree(alloc);
         return xa_load(&sa_allocators, tgid);
     } else if (err) {
@@ -249,8 +257,10 @@ long sa_alloc(uint64_t *vaddr) {
     t_desc = kmalloc(sizeof(*t_desc), GFP_KERNEL);
     if (!t_desc) return -ENOMEM;
 
+    rcu_read_lock();
     allocator = alloc_get_or_creat(current->tgid);
     if (!allocator) {
+        rcu_read_unlock();
         err = -ENOMEM;
         goto no_allocator;
     }
