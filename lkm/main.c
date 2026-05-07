@@ -32,6 +32,7 @@ chrdev_failed:
 
 static void __exit runtime_exit(void) {
     chrdev_cleanup();
+    vma_free();
 }
 
 MODULE_AUTHOR("Francesco Donnini <donnini.francesco00@gmail.com>");

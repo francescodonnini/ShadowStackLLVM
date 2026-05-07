@@ -35,4 +35,6 @@ long sa_fork(pid_t p_tgid, pid_t p_pid);
 
 long resolve_symbols(void);
 
+void vma_free(void);
+
 #endif

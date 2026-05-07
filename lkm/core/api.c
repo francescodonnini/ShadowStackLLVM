@@ -465,3 +465,19 @@ no_alloc:
     kfree(t_desc);
     return err;
 }
+
+void vma_free(void) {
+    struct list_head old_list;
+
+    spin_lock(&global_vma_lock);
+    list_splice_init(&global_vma_list, &old_list);
+    global_vma_list_size = 0;
+    spin_unlock(&global_vma_lock);
+
+    struct gl_vma_desc *it;
+    struct gl_vma_desc *tmp;
+    list_for_each_entry_safe(it, tmp, &old_list, list) {
+        vfree(it->kernel_addr);
+        kfree(it);
+    }
+}
