@@ -292,6 +292,10 @@ long sa_alloc(uint64_t *vaddr) {
         return -ENOMEM;
     }
 
+    t_desc->tid = current->pid;
+    t_desc->usr_addr = usr_addr;
+    t_desc->kernel_addr = kernel_addr;
+
     mmap_write_lock(mm);
     for (offset = 0; offset < SS_SIZE; offset += PAGE_SIZE) {
         phys_addr_t phy = vmalloc_to_phy(kernel_addr + offset);
@@ -311,10 +315,6 @@ long sa_alloc(uint64_t *vaddr) {
         }
     }
     mmap_write_unlock(mm);
-
-    t_desc->tid = current->pid;
-    t_desc->usr_addr = usr_addr;
-    t_desc->kernel_addr = kernel_addr;
 
     alloc_add_t(alloc, t_desc);
     *vaddr = usr_addr;
@@ -358,7 +358,6 @@ long sa_free(uint64_t usr_addr){
 
     gl_free(t_desc->kernel_addr);
     alloc_freelist_add(alloc, &t_desc->list);
-    kfree(t_desc);
     alloc_put(alloc);
 
     return 0;
