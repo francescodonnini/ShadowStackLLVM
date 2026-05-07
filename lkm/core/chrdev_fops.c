@@ -109,7 +109,6 @@ static void sa_remove_pmd(struct mm_struct *mm, pmd_t *pmd, unsigned long addr, 
 
         pte = pte_offset_kernel(pmd, addr);
         sa_remove_pte(mm, pte, addr, next);
-        sa_free_pte(mm, pte_offset_kernel(pmd, 0), pmd);
     }
 }
 
@@ -127,7 +126,6 @@ static void sa_remove_pud(struct mm_struct *mm, pud_t *pud, unsigned long addr, 
         pmd = pmd_offset(pud, addr);
         pmd_base = pmd_offset(pud, 0);
         sa_remove_pmd(mm, pmd, addr, next);
-        sa_free_pmd(mm, pmd_base, pud);
     }
 }
 
@@ -143,7 +141,6 @@ static void sa_remove_p4d(struct mm_struct *mm, p4d_t *p4d, unsigned long addr, 
 
         pud = pud_offset(p4d, addr);
         sa_remove_pud(mm, pud, addr, next);
-        sa_free_pud(mm, pud_offset(p4d, 0), p4d);
     }
 }
 
