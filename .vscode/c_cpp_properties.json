@@ -117,6 +117,18 @@
             "cStandard": "c17",
             "cppStandard": "c++17",
             "intelliSenseMode": "linux-clang-x64"
+        },
+        {
+            "name": "llvm[ubuntu18]",
+            "includePath": [
+                "${workspaceFolder}/**",
+                "/home/ubuntu/llvm-project/build/include",
+                "/home/ubuntu/llvm-project/llvm/include"
+            ],
+            "compilerPath": "/usr/bin/clang++",
+            "cStandard": "c17",
+            "cppStandard": "c++17",
+            "intelliSenseMode": "linux-clang-x64"
         }
     ],
     "version": 4
