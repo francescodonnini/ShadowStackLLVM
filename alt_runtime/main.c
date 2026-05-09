@@ -10,7 +10,7 @@
 #include <sys/syscall.h>
 #include <unistd.h>
 
-static int shadow_fd;
+int shadow_fd = -1;
 
 typedef pid_t (*real_fork_t)(void);
 typedef int   (*real_pthread_create_t)(pthread_t*, const pthread_attr_t*, void* (*)(void*), void*);

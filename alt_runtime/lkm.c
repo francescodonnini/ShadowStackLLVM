@@ -17,6 +17,9 @@ struct ss_chunk* mem_pool_alloc(void) {
     }
     
     struct ss_chunk *chunk = (struct ss_chunk *)req.addr;
+
+    printf("got address %p\n", chunk);
+
     chunk->padding = NULL;
     chunk->top = chunk->data;
     return chunk;
