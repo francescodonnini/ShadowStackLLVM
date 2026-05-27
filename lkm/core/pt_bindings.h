@@ -10,12 +10,20 @@ typedef int    (*__pte_alloc_t)(struct mm_struct*,pmd_t*);
 typedef void   (*__flush_tlb_mm_range_t)(struct mm_struct*,unsigned long,unsigned long,unsigned int,bool);
 typedef pte_t* (*__pte_offset_map_lock_t)(struct mm_struct*, pmd_t*,unsigned long, spinlock_t **);
 
+#if LINUX_VERSION_CODE >= KERNEL_VERSION(6, 18, 7)
+typedef void   (*__pagetable_free_kernel_t)(struct ptdesc *pt);
+#endif
+
 extern __p4d_alloc_t __p4d_alloc_bnd;
 extern __pud_alloc_t __pud_alloc_bnd;
 extern __pmd_alloc_t __pmd_alloc_bnd;
 extern __pte_alloc_t __pte_alloc_bnd;
-extern __flush_tlb_mm_range_t __flush_tlb_mm_range_bnd;
-extern __pte_offset_map_lock_t __pte_offset_map_lock_bnd;
+extern __flush_tlb_mm_range_t    __flush_tlb_mm_range_bnd;
+extern __pte_offset_map_lock_t   __pte_offset_map_lock_bnd;
+
+#if LINUX_VERSION_CODE >= KERNEL_VERSION(6, 18, 7)
+extern __pagetable_free_kernel_t __pagetable_free_kernel_bnd;
+#endif
 
 static inline p4d_t *my_p4d_alloc(struct mm_struct *mm, pgd_t *pgd, unsigned long address) {
     return (unlikely(pgd_none(*pgd)) && __p4d_alloc_bnd(mm, pgd, address)) ? NULL : p4d_offset(pgd, address);
@@ -53,5 +61,68 @@ static inline pte_t *my_pte_alloc_map_lock(struct mm_struct *mm, pmd_t *pmd, uns
         ? NULL
         : my_pte_offset_map_lock(mm, pmd, addr, ptlp);
 }
+
+#if LINUX_VERSION_CODE >= KERNEL_VERSION(6, 18, 7)
+#ifdef CONFIG_ASYNC_KERNEL_PGTABLE_FREE
+static inline void my_pagetable_free_kernel(struct ptdesc *pt) {
+    __pagetable_free_kernel_bnd(pt);
+}
+#else
+static inline void my_pagetable_free_kernel(struct ptdesc *pt) {
+	__pagetable_free(pt);
+}
+#endif
+
+static inline void my_pagetable_free(struct ptdesc *pt) {
+	if (ptdesc_test_kernel(pt)) {
+		ptdesc_clear_kernel(pt);
+		my_pagetable_free_kernel(pt);
+	} else {
+		__pagetable_free(pt);
+	}
+}
+
+static inline void my_pagetable_dtor_free(struct ptdesc *ptdesc) {
+	pagetable_dtor(ptdesc);
+	my_pagetable_free(ptdesc);
+}
+
+static inline void my_pte_free(struct mm_struct *mm, struct page *pte_page) {
+    struct ptdesc *ptdesc = page_ptdesc(pte_page);
+	my_pagetable_dtor_free(ptdesc);
+}
+
+static inline void my_pmd_free(struct mm_struct *mm, pmd_t *pmd) {
+    struct ptdesc *ptdesc = page_ptdesc(virt_to_page(pmd));
+    my_pagetable_dtor_free(ptdesc);
+}
+
+static inline void my_pud_free(struct mm_struct *mm, pud_t *pud) {
+    struct ptdesc *ptdesc = page_ptdesc(virt_to_page(pud));
+    my_pagetable_dtor_free(ptdesc);
+}
+
+static inline void my_p4d_free(struct mm_struct *mm, p4d_t *p4d) {
+    struct ptdesc *ptdesc = page_ptdesc(virt_to_page(p4d));
+    my_pagetable_dtor_free(ptdesc);
+}
+#else
+static inline void my_pte_free(struct mm_struct *mm, struct page *pte_page) {
+    struct ptdesc *ptdesc = page_ptdesc(pte_page);
+	pagetable_dtor_free(ptdesc);
+}
+
+static inline void my_pmd_free(struct mm_struct *mm, pmd_t *pmd) {
+    pmd_free(mm, pmd);
+}
+
+static inline void my_pud_free(struct mm_struct *mm, pud_t *pud) {
+    pud_free(mm, pud);
+}
+
+static inline void my_p4d_free(struct mm_struct *mm, p4d_t *p4d) {
+    p4d_free(mm, p4d);
+}
+#endif
 
 #endif

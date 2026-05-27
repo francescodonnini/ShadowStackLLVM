@@ -8,7 +8,9 @@ __pmd_alloc_t __pmd_alloc_bnd = NULL;
 __pte_alloc_t __pte_alloc_bnd = NULL;
 __pte_offset_map_lock_t __pte_offset_map_lock_bnd;
 __flush_tlb_mm_range_t __flush_tlb_mm_range_bnd;
-
+#if LINUX_VERSION_CODE >= KERNEL_VERSION(6, 18, 7)
+__pagetable_free_kernel_t __pagetable_free_kernel_bnd;
+#endif
 
 static struct kprobe kp = {
     .symbol_name = "kallsyms_lookup_name"
@@ -41,5 +43,10 @@ long resolve_symbols(void) {
     __pte_offset_map_lock_bnd = (__pte_offset_map_lock_t) ksyms_lookup("__pte_offset_map_lock");
     if (!__pte_offset_map_lock_bnd) return -1;
 #endif
+#if LINUX_VERSION_CODE >= KERNEL_VERSION(6, 18, 7)
+    __pagetable_free_kernel_bnd = (__pagetable_free_kernel_t) ksyms_lookup("pagetable_free_kernel");
+    if (!__pagetable_free_kernel_bnd) return -1;
+#endif
+
     return 0;
 }

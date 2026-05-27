@@ -79,10 +79,10 @@
             "name": "lkm-fedora",
             "includePath": [
                 "${workspaceFolder}/**",
-                "/usr/src/kernels/6.19.13-100.fc42.x86_64/include",
-                "/usr/src/kernels/6.19.13-100.fc42.x86_64/arch/x86/include",
-                "/usr/src/kernels/6.19.13-100.fc42.x86_64/arch/x86/include/generated",
-                "/usr/src/kernels/6.19.13-100.fc42.x86_64/include/generated"
+                "/usr/src/kernels/6.19.14-108.fc42.x86_64/include",
+                "/usr/src/kernels/6.19.14-108.fc42.x86_64/arch/x86/include",
+                "/usr/src/kernels/6.19.14-108.fc42.x86_64/arch/x86/include/generated",
+                "/usr/src/kernels/6.19.14-108.fc42.x86_64/include/generated"
             ],
             "defines": [
                 "__KERNEL__",
@@ -95,7 +95,7 @@
                 "CONFIG_PAGE_OFFSET=0xffff888000000000UL"
             ],
             "forcedInclude": [
-                "/usr/src/kernels/6.19.13-100.fc42.x86_64/include/linux/kconfig.h"
+                "/usr/src/kernels/6.19.14-108.fc42.x86_64/include/linux/kconfig.h"
             ],
             "compilerArgs": [
                 "-nostdinc"
