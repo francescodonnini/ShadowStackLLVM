@@ -1,5 +1,4 @@
 #include "debug.h"
-
 #include <linux/debugfs.h>
 #include <linux/init.h>
 #include <linux/mm.h>
@@ -17,29 +16,6 @@ static u32 target_pid = 1;
 static struct dentry *debug_dir;
 static struct dentry *debug_pgd;
 
-int debugfs_init(void) {
-    debug_dir = debugfs_create_dir("ss_dbg", NULL);
-    if (!debug_dir) {
-        pr_err("cannot create debugfs directory");
-        return -ENOMEM;
-    }
-
-    debugfs_create_u32("target_pid", 0644, debug_dir, &target_pid);
-
-    debug_pgd = debugfs_create_file("pgd", 0400, debug_dir, NULL, &debug_fops);
-    if (!debug_pgd) {
-        pr_err("cannot create debugfs file");
-        debugfs_remove(debug_dir);
-        return -ENOMEM;
-    }
-
-    return 0;
-}
-
-void pgd_debug_exit(void) {
-    debugfs_remove_recursive(debug_dir);
-}
-
 static int pgd_show(struct seq_file *m, void *v) {
     struct task_struct *task;
     struct mm_struct *mm;
@@ -50,7 +26,7 @@ static int pgd_show(struct seq_file *m, void *v) {
     task = pid_task(find_vpid(target_pid), PIDTYPE_PID);
     if (!task) {
         rcu_read_unlock();
-        seq_printf("error: PID %u not found\n", target_pid);
+        seq_printf(m, "error: PID %u not found\n", target_pid);
         return 0;
     }
 
@@ -71,11 +47,11 @@ static int pgd_show(struct seq_file *m, void *v) {
     seq_printf(m, "----------------\n");
 
     for (i = 256; i < PTRS_PER_PGD; ++i) {
-        pgd_t row;
+        pgd_t entry;
 
-        row = pgd[i];
-        if (!pgd_none(row)) {
-            seq_printf(m, " %4d | 0x%016lx\n", i, (unsigned long)pgd_val(pgd));
+        entry = pgd[i];
+        if (!pgd_none(entry)) {
+            seq_printf(m, " %4d | 0x%016lx\n", i, (unsigned long)pgd_val(entry));
         }
     }
 
@@ -86,10 +62,33 @@ static int debug_file_open(struct inode *inode, struct file *file) {
     return single_open(file, pgd_show, NULL);
 }
 
-static const struct file_operations pgd_fops = {
+static const struct file_operations debug_fops = {
     .owner = THIS_MODULE,
     .open = debug_file_open,
     .read = seq_read,
     .llseek = seq_lseek,
     .release = single_release,
 };
+
+int debug_init(void) {
+    debug_dir = debugfs_create_dir("ss_dbg", NULL);
+    if (!debug_dir) {
+        pr_err("cannot create debugfs directory");
+        return -ENOMEM;
+    }
+
+    debugfs_create_u32("target_pid", 0644, debug_dir, &target_pid);
+
+    debug_pgd = debugfs_create_file("pgd", 0400, debug_dir, NULL, &debug_fops);
+    if (!debug_pgd) {
+        pr_err("cannot create debugfs file");
+        debugfs_remove(debug_dir);
+        return -ENOMEM;
+    }
+
+    return 0;
+}
+
+void debug_exit(void) {
+    debugfs_remove_recursive(debug_dir);
+}

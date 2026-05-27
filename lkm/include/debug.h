@@ -1,6 +1,8 @@
 #ifndef LKM_DEBUG_H
 #define LKM_DEBUG_H
 
-int debugfs_init(void);
+int debug_init(void);
 
-void pgd_debug_exit(void);
+void debug_exit(void);
+
+#endif
