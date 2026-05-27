@@ -10,11 +10,11 @@
 #include <linux/seq_file.h>
 
 #include <asm/pgtable.h>
+#define KERNEL_PGD_START 256
 
 static u32 target_pid = 1;
 
 static struct dentry *debug_dir;
-static struct dentry *debug_pgd;
 
 static int pgd_show(struct seq_file *m, void *v) {
     struct task_struct *task;
@@ -36,7 +36,7 @@ static int pgd_show(struct seq_file *m, void *v) {
     mm = get_task_mm(task);
     put_task_struct(task);
     if (!mm) {
-        seq_printf(m, "error: PID %d (%s) has no mm_struct (likely a kernel thread)\n", current->pid, current->comm);
+        seq_printf(m, "error: PID %d has no mm_struct (likely a kernel thread)\n", target_pid);
         return 0;
     }
 
@@ -45,7 +45,7 @@ static int pgd_show(struct seq_file *m, void *v) {
     seq_printf(m, "#PID=%d\n", target_pid);
     seq_printf(m, "index,value\n");
 
-    for (i = 256; i < PTRS_PER_PGD; ++i) {
+    for (i = KERNEL_PGD_START; i < PTRS_PER_PGD; ++i) {
         pgd_t entry;
 
         entry = pgd[i];
@@ -54,6 +54,7 @@ static int pgd_show(struct seq_file *m, void *v) {
         }
     }
 
+    mmput(mm);
     return 0;
 }
 
@@ -71,20 +72,12 @@ static const struct file_operations debug_fops = {
 
 int debug_init(void) {
     debug_dir = debugfs_create_dir("ss_dbg", NULL);
-    if (!debug_dir) {
-        pr_err("cannot create debugfs directory");
-        return -ENOMEM;
+    if (IS_ERR(debug_dir)) {
+        pr_debug("cannot create debugfs directory: %ld\n", PTR_ERR(debug_dir));
     }
 
     debugfs_create_u32("target_pid", 0644, debug_dir, &target_pid);
-
-    debug_pgd = debugfs_create_file("pgd", 0400, debug_dir, NULL, &debug_fops);
-    if (!debug_pgd) {
-        pr_err("cannot create debugfs file");
-        debugfs_remove(debug_dir);
-        return -ENOMEM;
-    }
-
+    debugfs_create_file("pgd", 0400, debug_dir, NULL, &debug_fops);
     return 0;
 }
 

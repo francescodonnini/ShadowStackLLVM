@@ -19,10 +19,7 @@ static int __init runtime_init(void) {
         return -1;
     }
 
-    err = debug_init();
-    if (err) {
-        return err;
-    }
+    debug_init();
 
     err = chrdev_init();
     if (err) {
