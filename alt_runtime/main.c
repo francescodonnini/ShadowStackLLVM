@@ -7,6 +7,7 @@
 
 #include <asm/prctl.h>
 #include <dlfcn.h>
+#include <immintrin.h>
 #include <sys/syscall.h>
 #include <unistd.h>
 
@@ -39,11 +40,14 @@ static void make_key(void) {
     pthread_key_create(&ss_cleanup_key, ss_dtor);
 }
 
+__attribute__((target("fsgsbase")))
 static inline void get_chunk(struct ss_chunk *chunk) {
-     if (syscall(SYS_arch_prctl, ARCH_SET_GS, (unsigned long)chunk) != 0) {
-        perror("[ss] arch_prctl failed");
-        exit(EXIT_FAILURE);
-    }
+    // if (syscall(SYS_arch_prctl, ARCH_SET_GS, (unsigned long)chunk) != 0) {
+    //     fprintf(stderr, "cannot map %p to gs\n", chunk);
+    //     perror("arch_prctl failed");
+    //     exit(EXIT_FAILURE);
+    // }
+    _writegsbase_u64((unsigned long long)chunk);
 } 
 
 __attribute__((constructor))

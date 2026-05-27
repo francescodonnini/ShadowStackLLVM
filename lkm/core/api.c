@@ -27,9 +27,9 @@ struct sa_thread_desc {
 
 static DEFINE_XARRAY(sa_allocators);
 
-static void init_ss(void *s) {
-    uint64_t *p = s;
-    p[sizeof(*p)] = (uint64_t)&p[sizeof(*p) + sizeof(*p)];
+static void init_ss(void *kernel_addr, uint64_t usr_addr) {
+    uint64_t *p = (uint64_t*)kernel_addr;
+    p[1] = usr_addr + 16;
 }
 
 static void *gl_vmalloc(void) {
@@ -219,7 +219,10 @@ struct sa_allocator_desc* alloc_create(pid_t tgid, struct mm_struct *mm) {
     long err;
 
     alloc = kmalloc(sizeof(*alloc), GFP_KERNEL);
-    if (!alloc) return NULL;
+    if (!alloc) {
+        pr_err("out of memory");
+        return NULL;
+    }
 
     alloc->tgid = tgid;
     alloc->mm = mm;
@@ -236,6 +239,7 @@ struct sa_allocator_desc* alloc_create(pid_t tgid, struct mm_struct *mm) {
         if (err == -EBUSY) {
             pr_err("Allocator for TGID %d does already exists", tgid);
         }
+        pr_err("cannot insert allocator for %d", tgid);
         return NULL;
     }
 
@@ -297,7 +301,7 @@ long sa_alloc(uint64_t *vaddr) {
         return -ENOMEM;
     }
 
-    init_ss(kernel_addr);
+    init_ss(kernel_addr, usr_addr);
     t_desc->tid = current->pid;
     t_desc->usr_addr = usr_addr;
     t_desc->kernel_addr = kernel_addr;
@@ -433,7 +437,6 @@ long sa_fork(pid_t p_tgid, pid_t p_pid) {
         goto no_vmalloc;
     }
 
-    init_ss(c_stack);
     t_desc->kernel_addr = c_stack;
     t_desc->tid = current->pid;
 

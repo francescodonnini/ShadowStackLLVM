@@ -1,5 +1,6 @@
 #include "api.h"
 #include "chrdev.h"
+#include "debug.h"
 #include <linux/init.h>
 #include <linux/module.h>
 #include <linux/printk.h>
@@ -18,19 +19,24 @@ static int __init runtime_init(void) {
         return -1;
     }
 
+    err = debug_init();
+    if (err) {
+        return err;
+    }
+
     err = chrdev_init();
     if (err) {
-        goto chrdev_failed;
+        goto out;
     }
     return err;
 
-chrdev_failed:
-    chrdev_cleanup();
-    pr_err("runtime_init failed, got error %d", err);
+out:
+    debug_exit();
     return err;
 }
 
 static void __exit runtime_exit(void) {
+    debug_exit();
     chrdev_cleanup();
     vma_free();
 }
