@@ -219,7 +219,10 @@ struct sa_allocator_desc* alloc_create(pid_t tgid, struct mm_struct *mm) {
     long err;
 
     alloc = kmalloc(sizeof(*alloc), GFP_KERNEL);
-    if (!alloc) return NULL;
+    if (!alloc) {
+        pr_err("out of memory");
+        return NULL;
+    }
 
     alloc->tgid = tgid;
     alloc->mm = mm;
@@ -236,6 +239,7 @@ struct sa_allocator_desc* alloc_create(pid_t tgid, struct mm_struct *mm) {
         if (err == -EBUSY) {
             pr_err("Allocator for TGID %d does already exists", tgid);
         }
+        pr_err("cannot insert allocator for %d", tgid);
         return NULL;
     }
 
