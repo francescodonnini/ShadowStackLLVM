@@ -17,7 +17,7 @@ struct SSFunctionPass : public PassInfoMixin<SSFunctionPass> {
 
     PreservedAnalyses run(Function &F, FunctionAnalysisManager &FAM);
 private:
-    constexpr static auto MASK = 0x6FFFFFFFFFFFULL;
+    constexpr static auto MASK = 0x7fffffffffffULL;
 
     bool _instrumentFun;
     bool _instrumentStore;
