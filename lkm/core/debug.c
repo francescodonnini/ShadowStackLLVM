@@ -42,7 +42,7 @@ static int pgd_show(struct seq_file *m, void *v) {
 
     pgd = mm->pgd;
 
-    seq_printf(m, "#PID=%d;name=%s\n", current->pid, current->comm);
+    seq_printf(m, "#PID=%d\n", target_pid);
     seq_printf(m, "index,value\n");
 
     for (i = 256; i < PTRS_PER_PGD; ++i) {
