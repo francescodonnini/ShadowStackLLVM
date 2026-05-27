@@ -42,16 +42,15 @@ static int pgd_show(struct seq_file *m, void *v) {
 
     pgd = mm->pgd;
 
-    seq_printf(m, "PGD dump for PID %d (%s)\n", current->pid, current->comm);
-    seq_printf(m, "idx | value\n");
-    seq_printf(m, "----------------\n");
+    seq_printf(m, "#PID=%d;name=%s\n", current->pid, current->comm);
+    seq_printf(m, "index,value\n");
 
     for (i = 256; i < PTRS_PER_PGD; ++i) {
         pgd_t entry;
 
         entry = pgd[i];
-        if (!pgd_none(entry)) {
-            seq_printf(m, " %4d | 0x%016lx\n", i, (unsigned long)pgd_val(entry));
+        if ((pgd_val(entry) & 0b1) != 0) {
+            seq_printf(m, "%3d,0x%016lx\n", i, (unsigned long)pgd_val(entry));
         }
     }
 
