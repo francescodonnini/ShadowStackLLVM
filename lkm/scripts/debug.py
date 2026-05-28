@@ -1,8 +1,9 @@
 import os
 import sys
 
-TARGET_PID_PATH = "/sys/kernel/debug/ss_dbg/target_pid"
-PGD_PATH = "/sys/kernel/debug/ss_dbg/pgd"
+DEBUGFS_MOUNT_POINT = "/sys/kernel/debug"
+TARGET_PID_PATH = os.path.join(DEBUGFS_MOUNT_POINT, "ss_dbg", "target_pid")
+PGD_PATH = os.path.join(DEBUGFS_MOUNT_POINT, "ss_dbg", "pgd_hi")
 
 def get_all_pids():
     for dirname in os.listdir('/proc'):

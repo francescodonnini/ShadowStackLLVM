@@ -21,6 +21,7 @@ static int pgd_show(struct seq_file *m, void *v) {
     struct mm_struct *mm;
     pgd_t *pgd;
     int i;
+    int start;
 
     rcu_read_lock();
     task = pid_task(find_vpid(target_pid), PIDTYPE_PID);
@@ -45,12 +46,20 @@ static int pgd_show(struct seq_file *m, void *v) {
     seq_printf(m, "#PID=%d\n", target_pid);
     seq_printf(m, "index,value\n");
 
-    for (i = KERNEL_PGD_START; i < PTRS_PER_PGD; ++i) {
+    if ((unsigned long)m->private) {
+        start = KERNEL_PGD_START;
+    } else {
+        start = 0;
+    }
+
+    for (i = 0; i < 256; ++i) {
+        int index;
         pgd_t entry;
 
-        entry = pgd[i];
+        index = start + i;
+        entry = pgd[index];
         if ((pgd_val(entry) & 0b1) != 0) {
-            seq_printf(m, "%3d,0x%016lx\n", i, (unsigned long)pgd_val(entry));
+            seq_printf(m, "%3d,0x%016lx\n", index, (unsigned long)pgd_val(entry));
         }
     }
 
@@ -59,7 +68,7 @@ static int pgd_show(struct seq_file *m, void *v) {
 }
 
 static int debug_file_open(struct inode *inode, struct file *file) {
-    return single_open(file, pgd_show, NULL);
+    return single_open(file, pgd_show, inode->i_private);
 }
 
 static const struct file_operations debug_fops = {
@@ -77,7 +86,8 @@ int debug_init(void) {
     }
 
     debugfs_create_u32("target_pid", 0644, debug_dir, &target_pid);
-    debugfs_create_file("pgd", 0400, debug_dir, NULL, &debug_fops);
+    debugfs_create_file("pgd_hi", 0400, debug_dir, (void *)1, &debug_fops);
+    debugfs_create_file("pgd_lo", 0400, debug_dir, (void *)0, &debug_fops);
     return 0;
 }
 
