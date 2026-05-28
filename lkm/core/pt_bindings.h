@@ -46,7 +46,9 @@ static inline void my_flush_tlb_mm(struct mm_struct *mm) {
 }
 
 static inline pte_t *my_pte_offset_map_lock(struct mm_struct *mm, pmd_t *pmd, unsigned long addr, spinlock_t **ptlp) {
-#if LINUX_VERSION_CODE > KERNEL_VERSION(6, 4, 0)
+#if LINUX_VERSION_CODE >= KERNEL_VERSION(7, 0, 0)
+    return __pte_offset_map_lock_bnd(mm, pmd, addr, ptlp);
+#elif LINUX_VERSION_CODE >= KERNEL_VERSION(6, 5, 0)
     pte_t *pte;
 
 	__cond_lock(*ptlp, pte = __pte_offset_map_lock_bnd(mm, pmd, addr, ptlp));
