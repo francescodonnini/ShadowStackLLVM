@@ -18,7 +18,6 @@ enum {
 
 struct ioctl_mem_params { 
     long error;
-    unsigned long long addr;
 };
 
 struct ioctl_fork_params {

@@ -10,8 +10,10 @@
 #include <immintrin.h>
 #include <sys/syscall.h>
 #include <unistd.h>
+#define STACK_START 600000001000ULL
+#define STACK_SIZE  (1024 * 1024)
 
-int shadow_fd = -1;
+pthread_local int shadow_fd = -1;
 
 typedef pid_t (*real_fork_t)(void);
 typedef int   (*real_pthread_create_t)(pthread_t*, const pthread_attr_t*, void* (*)(void*), void*);

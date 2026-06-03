@@ -8,9 +8,10 @@
 #include <linux/sched/mm.h>
 #include <linux/spinlock.h>
 #include <linux/types.h>
-#define SS_START     (0xffffeb0000000000ULL)
-#define SS_END       (0xfffffc0000000000ULL)
-#define SS_SIZE      (1024 * 1024)
+#define SS_OFFSET  0xFFFFD88000000000ULL - 0x0000600000000000ULL
+#define SS_START   (0xffffeb0000000000ULL)
+#define SS_END     (0xfffffc0000000000ULL)
+#define SS_SIZE    (1024 * 1024)
 
 struct sa_allocator_desc {
     pid_t                tgid;
@@ -32,6 +33,8 @@ long sa_alloc(uint64_t *vaddr);
 long sa_free(uint64_t usr_addr);
 
 long sa_fork(pid_t p_tgid, pid_t p_pid);
+
+long sa_pivot(uint64_t old_stack, uint64_t new_stack);
 
 long resolve_symbols(void);
 
