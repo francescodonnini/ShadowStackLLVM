@@ -32,5 +32,5 @@ struct ioctl_fork_params {
 struct ioctl_pivot_params {
     long error;
     unsigned long long new_stack;
-}
+};
 #endif
