@@ -6,18 +6,18 @@
 #include <linux/sched.h>
 
 int shadow_open(struct inode *inode, struct file *file) {
-    struct mm_struct *mm;
-
-    mm = current->mm;
-    if (mm) {
-        struct sa_allocator_desc *alloc;
-
-        alloc = alloc_create(current->tgid, mm);
-        if (!alloc) return -ENOMEM;
-
-        mmgrab(mm);
-        file->private_data = alloc;
-    }
+    // struct mm_struct *mm;
+// 
+    // mm = current->mm;
+    // if (mm) {
+    //     struct sa_allocator_desc *alloc;
+// 
+    //     alloc = alloc_create(current->tgid, mm);
+    //     if (!alloc) return -ENOMEM;
+// 
+    //     mmgrab(mm);
+    //     file->private_data = alloc;
+    // }
     return 0;
 }
 
@@ -172,18 +172,18 @@ static long sa_tdown(struct mm_struct *mm) {
 }
 
 int shadow_release(struct inode *inode, struct file *file) {
-    struct sa_allocator_desc *alloc;
-    struct mm_struct *mm;
-    
-    alloc = file->private_data;
-    if (!alloc) return 0;
-
-    mm = alloc->mm;
-    if (mm && mmget_not_zero(mm)) {
-        sa_tdown(mm);
-        mmput(mm);
-    }
-
-    alloc_destroy(alloc);
+    // struct sa_allocator_desc *alloc;
+    // struct mm_struct *mm;
+    // 
+    // alloc = file->private_data;
+    // if (!alloc) return 0;
+// 
+    // mm = alloc->mm;
+    // if (mm && mmget_not_zero(mm)) {
+    //     sa_tdown(mm);
+    //     mmput(mm);
+    // }
+// 
+    // alloc_destroy(alloc);
     return 0;
 }

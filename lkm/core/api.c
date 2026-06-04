@@ -481,6 +481,72 @@ no_alloc:
     return err;
 }
 
+long sa_pivot(uint64_t rsp, uint64_t new_stack_address) {
+    struct mm_struct *mm;
+    struct vm_area_struct *old_stack_area;
+    struct vm_area_struct *new_stack_area;
+    unsigned long old_stck_start;
+    size_t old_stck_len;
+    unsigned long new_stck_start;
+    long delta;
+    int i;
+    long err;
+
+    mm = current->mm;
+    if (!mm) return -EINVAL;
+
+    err = -1;
+    mmap_write_lock(mm);
+
+    old_stack_area = find_vma(mm, rsp);
+    if (!old_stack_area || old_stack_area->vm_start > rsp) {
+        err = -EINVAL;
+        goto out;
+    }
+    old_stck_start = old_stack_area->vm_start;
+    old_stck_len = old_stack_area->vm_end - old_stack_area->vm_start;
+    pr_info("old stack: [%lx - %lx)", old_stck_start, old_stck_start + old_stck_len);
+
+    new_stack_area = find_vma(mm, new_stack_address);
+    if (!new_stack_area || new_stack_area->vm_start > new_stack_address) {
+        err = -EINVAL;
+        goto out;
+    }
+    new_stck_start = new_stack_area->vm_start;
+    delta = new_stack_address - rsp;
+    pr_info("new stack start: %lx", new_stck_start);
+    pr_info("delta: %ld", delta);
+
+
+    spin_lock(&mm->arg_lock);
+    mm->start_stack = new_stck_start;
+    mm->arg_start += delta;
+    mm->arg_end += delta;
+    mm->env_start += delta;
+    mm->env_end += delta;
+    for (i = 0; i < AT_VECTOR_SIZE; i += 2) {
+        unsigned long key;
+    
+        key = mm->saved_auxv[i];
+        if (key == AT_NULL) break;
+    
+        if (key == AT_PLATFORM || key == AT_RANDOM || key == AT_EXECFN) {
+            mm->saved_auxv[i + 1] += delta;
+        }
+    }
+    spin_unlock(&mm->arg_lock);
+
+    vm_flags_clear(old_stack_area, VM_GROWSDOWN);
+    vm_flags_set(new_stack_area, VM_GROWSDOWN);
+
+out:
+    mmap_write_unlock(mm);
+
+    vm_munmap(old_stack_area->vm_start, old_stack_area->vm_end - old_stack_area->vm_start);
+
+    return err;
+}
+
 void vma_free(void) {
     LIST_HEAD(old_list);
     struct gl_vma_desc *it;

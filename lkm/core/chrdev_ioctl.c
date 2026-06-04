@@ -20,6 +20,7 @@ static long check_ioctl_cmd(unsigned int cmd) {
     case IOCTL_SHADOW_REQ:
     case IOCTL_SHADOW_FREE:
     case IOCTL_SHADOW_FORK:
+    case IOCTL_SHADOW_PIVOT:
         break;
     default:
         return -ENOTTY;
@@ -81,6 +82,18 @@ long chrdev_ioctl(struct file *file, unsigned int cmd, unsigned long arg) {
         fork_req.error = sa_fork(fork_req.p_tgid, fork_req.p_pid);
         
         if (copy_to_user(user_arg, &fork_req, sizeof(fork_req)))
+            return -EFAULT;
+        break;
+    }
+    case IOCTL_SHADOW_PIVOT: {
+        struct ioctl_pivot_params pivot_req;
+
+        if (copy_from_user(&pivot_req, user_arg, sizeof(pivot_req)))
+            return -EFAULT;
+
+        pivot_req.error = sa_pivot(pivot_req.rsp, pivot_req.new_stack_address);
+
+        if (copy_to_user(user_arg, &pivot_req, sizeof(pivot_req)))
             return -EFAULT;
         break;
     }

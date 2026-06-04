@@ -105,14 +105,15 @@
             "intelliSenseMode": "linux-gcc-x64"
         },
         {
-            "name": "lkm-fedora[vm]",
+            "name": "lkm-fedora[home::vm]",
             "includePath": [
                 "${workspaceFolder}/**",
                 "/usr/src/kernels/7.0.10-201.fc44.x86_64/include",
                 "/usr/src/kernels/7.0.10-201.fc44.x86_64/arch/x86/include",
                 "/usr/src/kernels/7.0.10-201.fc44.x86_64/arch/x86/include/generated",
                 "/usr/src/kernels/7.0.10-201.fc44.x86_64/include/generated",
-                "/usr/src/kernels/7.0.10-201.fc44.x86_64/include/generated/uapi"
+                "/usr/src/kernels/7.0.10-201.fc44.x86_64/include/generated/uapi",
+                "/usr/src/kernels/7.0.10-201.fc44.x86_64/include/uapi/asm-generic/"
             ],
             "defines": [
                 "__KERNEL__",
