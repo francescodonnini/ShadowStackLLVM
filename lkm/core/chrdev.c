@@ -14,13 +14,13 @@
 #define DEVICE_NAME  "shadowstack"
 #define DEVICE_CLASS "shadowstack_cls"
 
-struct bsnapshot_cdev {
-    dev_t           dev;
-    struct cdev     cdev;
-    struct class   *class;
+struct bshadowstack_cdev {
+    dev_t         dev;
+    struct cdev   cdev;
+    struct class *class;
 };
 
-static struct bsnapshot_cdev device;
+static struct bshadowstack_cdev device;
 
 static const struct file_operations ops = {
     .owner   = THIS_MODULE,
@@ -44,16 +44,15 @@ static ssize_t session_show(struct device *dev, struct device_attribute *attr, c
 
 DEVICE_ATTR(active, 0440, session_show, NULL);
 
-static struct attribute *bsnapshot_dev_attrs[] = {
+static struct attribute *bshadowstack_dev_attrs[] = {
     &dev_attr_active.attr,
     NULL,
 };
 
-ATTRIBUTE_GROUPS(bsnapshot_dev);
+ATTRIBUTE_GROUPS(bshadowstack_dev);
 
-/**
- * chrdev_init - create a device to handle ioctl operations from user space.
- */
+/// @brief Registers the "shadowstack" char-based device (at /dev/shadostack) and the class "shadowstack_cls"
+/// @return 
 int chrdev_init(void) {
     int err;
     struct class *device_class;
@@ -87,7 +86,7 @@ int chrdev_init(void) {
     device_class->dev_uevent = my_uevent;
     device.class = device_class;
 
-    dp = device_create_with_groups(device.class, NULL, device.dev, NULL, bsnapshot_dev_groups, DEVICE_NAME);
+    dp = device_create_with_groups(device.class, NULL, device.dev, NULL, bshadowstack_dev_groups, DEVICE_NAME);
     if (IS_ERR(dp)) {
         err = PTR_ERR(dp);
         pr_err("cannot create device /dev/%s, got error %d", DEVICE_NAME, err);

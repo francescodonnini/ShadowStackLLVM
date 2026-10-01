@@ -8,10 +8,16 @@
 #include <linux/sched/mm.h>
 #include <linux/spinlock.h>
 #include <linux/types.h>
+/// WARNING: These two shouldn't be hard-coded but determined at runtime (probably should be kernel module variables)
 #define SS_START     (0xffffeb0000000000ULL)
 #define SS_END       (0xfffffc0000000000ULL)
-#define SS_SIZE      (1024 * 1024)
+#define SS_SIZE      (8 * 1024 * 1024)
 
+/// "Shadow area" allocator descriptor
+/// It's a bump arena allocator where `free_area` is the address of the next memory area it can be used
+/// as a shadow stack area. An allocator is associated to a group of threads sharing the same thread group id.
+/// When a thread exits, its former shadow area is added to a free_list so it might be used by another thread.
+/// `kref` keeps track of how many threads might be using the allocator.
 struct sa_allocator_desc {
     pid_t                tgid;
     struct mm_struct    *mm;

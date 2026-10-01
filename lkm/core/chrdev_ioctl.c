@@ -42,48 +42,48 @@ long chrdev_ioctl(struct file *file, unsigned int cmd, unsigned long arg) {
         return err;
 
     switch (cmd) {
-    case IOCTL_SHADOW_REQ: {
-        struct ioctl_mem_params req;
-        unsigned long long addr;
+        case IOCTL_SHADOW_REQ: {
+            struct ioctl_mem_params req;
+            unsigned long long addr;
 
-        if (copy_from_user(&req, user_arg, sizeof(req)))
-            return -EFAULT;
+            if (copy_from_user(&req, user_arg, sizeof(req)))
+                return -EFAULT;
 
-        req.error = sa_alloc(&addr);
-        req.addr = addr;
+            req.error = sa_alloc(&addr);
+            req.addr = addr;
 
-        if (copy_to_user(user_arg, &req, sizeof(req)))
-            return -EFAULT;
-        
-        break;
-    }
-    case IOCTL_SHADOW_FREE: {
-        struct ioctl_mem_params req;
-        unsigned long addr;
-
-        if (copy_from_user(&req, user_arg, sizeof(req)))
-            return -EFAULT;
-
-        req.error = sa_free(req.addr);
-        req.addr = addr;
-
-        if (copy_to_user(user_arg, &req, sizeof(req)))
-            return -EFAULT;
-        
-        break;
-    }
-    case IOCTL_SHADOW_FORK: {
-        struct ioctl_fork_params fork_req;
-        
-        if (copy_from_user(&fork_req, user_arg, sizeof(fork_req)))
-            return -EFAULT;
+            if (copy_to_user(user_arg, &req, sizeof(req)))
+                return -EFAULT;
             
-        fork_req.error = sa_fork(fork_req.p_tgid, fork_req.p_pid);
-        
-        if (copy_to_user(user_arg, &fork_req, sizeof(fork_req)))
-            return -EFAULT;
-        break;
-    }
+            break;
+        }
+        case IOCTL_SHADOW_FREE: {
+            struct ioctl_mem_params req;
+            unsigned long addr;
+
+            if (copy_from_user(&req, user_arg, sizeof(req)))
+                return -EFAULT;
+
+            req.error = sa_free(req.addr);
+            req.addr = addr;
+
+            if (copy_to_user(user_arg, &req, sizeof(req)))
+                return -EFAULT;
+            
+            break;
+        }
+        case IOCTL_SHADOW_FORK: {
+            struct ioctl_fork_params fork_req;
+            
+            if (copy_from_user(&fork_req, user_arg, sizeof(fork_req)))
+                return -EFAULT;
+                
+            fork_req.error = sa_fork(fork_req.p_tgid, fork_req.p_pid);
+            
+            if (copy_to_user(user_arg, &fork_req, sizeof(fork_req)))
+                return -EFAULT;
+            break;
+        }
     }
 
     return 0;

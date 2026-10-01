@@ -7,17 +7,20 @@
 #include <linux/string.h>
 #include <linux/vmalloc.h>
 #include <linux/xarray.h>
+/// Maximum size of @global_vma_list 
 #define VMA_CAPACITY (128)
 
 struct gl_vma_desc {
-    void             *kernel_addr;
-    struct list_head  list;
+    void              *kernel_addr;
+    struct list_head   list;
 };
 
 static int global_vma_list_size = 0;
 static LIST_HEAD(global_vma_list);
 static DEFINE_SPINLOCK(global_vma_lock);
 
+/// @brief "shadow area" thread descriptor holds the virtual address (`vaddr`) of the user space the thread `tid` use as the shadow stack
+/// and the kernel address of the region where the shadow stack resides.
 struct sa_thread_desc {
     pid_t              tid;
     uint64_t           usr_addr;
@@ -27,11 +30,15 @@ struct sa_thread_desc {
 
 static DEFINE_XARRAY(sa_allocators);
 
+/// @brief Prepares the shadow stack area to be used by the user space thread. When using a direct-mapping strategy this function is a no-op.
+/// @param kernel_addr 
+/// @param usr_addr 
 static void init_ss(void *kernel_addr, uint64_t usr_addr) {
-    uint64_t *p = (uint64_t*)kernel_addr;
-    p[1] = usr_addr + 16;
 }
 
+/// @brief Creates a new virtual kernel memory mapping or recycle an old one not currently used (put in a free list).
+///        The underlying pages are zeroed before return the address to the caller.
+/// @return 
 static void *gl_vmalloc(void) {
     struct gl_vma_desc *desc;
     void *kaddr;
@@ -49,11 +56,15 @@ static void *gl_vmalloc(void) {
         memset(kaddr, 0, SS_SIZE);
         return kaddr;
     }
-    spin_unlock(&global_vma_lock);
 
+    spin_unlock(&global_vma_lock);
     return vzalloc(SS_SIZE);
 }
 
+/// @brief Tries to add a kernel memory region to the global free list so other thread can reuse it
+///        instead of using `vzalloc()`. The insertion might fail if the free list is full or there is no
+///        memory to create the list's node.
+/// @param kaddr 
 static void gl_free(void *kaddr) {
     struct gl_vma_desc *desc;
 
@@ -61,11 +72,13 @@ static void gl_free(void *kaddr) {
         vfree(kaddr);
         return;
     }
+    
     desc = kmalloc(sizeof(*desc), GFP_KERNEL);
     if (!desc) {
         vfree(kaddr);
         return;
     }
+    
     desc->kernel_addr = kaddr;
     spin_lock(&global_vma_lock);
     global_vma_list_size++;
@@ -73,6 +86,12 @@ static void gl_free(void *kaddr) {
     spin_unlock(&global_vma_lock);
 }
 
+/// @brief Modifies the thread's page table to map user space shadow area virtual address to the
+///        physical pages allocated via `vzalloc()`. 
+/// @param mm virtual memory struct associated to the user space instrumented thread
+/// @param vaddr user space address to associate with `phy`
+/// @param phy page physical address
+/// @return 0 on success, < 0 otherwise.
 static long map_ss(struct mm_struct *mm, uint64_t vaddr, phys_addr_t phy) {
     pgd_t *pgd;
     p4d_t *p4d;
@@ -127,12 +146,22 @@ static uint64_t vmalloc_to_phy(void *addr) {
     return phy + offset_in_page(addr);
 }
 
+/// @brief Adds a new thread descriptor to the allocator.
+/// @param alloc 
+/// @param t 
 static void alloc_add_t(struct sa_allocator_desc *alloc, struct sa_thread_desc *t) {
     down_write(&alloc->al_lock);
     list_add(&t->list, &alloc->active_list);
     up_write(&alloc->al_lock);
 }
 
+/// @brief Fetches the next user space address where the shadow area will be mapped to in user space.
+///        The address might be retrieved from the free list if there is one or from the bump counter
+///        if the free list is empty. If the address is retrieved by the bump counter it might be invalid
+///        because the address might surpass the valid virtual memory region reserved for the shadow stack, in
+///        practice this might be unlikely (caller must check if the virtual address is valid).
+/// @param alloc 
+/// @return an 8 byte address
 static uint64_t alloc_get_free_vaddr(struct sa_allocator_desc *alloc) {
     struct sa_thread_desc *desc;
     uint64_t vaddr;
@@ -146,8 +175,8 @@ static uint64_t alloc_get_free_vaddr(struct sa_allocator_desc *alloc) {
         kfree(desc);
         return vaddr;            
     }
+    
     spin_unlock(&alloc->fl_lock);
-
     return atomic64_fetch_add(SS_SIZE, &alloc->free_area);
 }
 
@@ -181,7 +210,6 @@ static void unmap_ss_page(struct mm_struct *mm, uint64_t vaddr) {
     if (!ptep) return;
 
     pte_clear(mm, vaddr, ptep);
-    
     pte_unmap_unlock(ptep, ptl);
 }
 
@@ -191,22 +219,21 @@ static void alloc_destroy_callback(struct kref *kref) {
     struct sa_thread_desc *t_tmp;
     
     alloc = container_of(kref, struct sa_allocator_desc, kref);
-
     list_for_each_entry_safe(t_desc, t_tmp, &alloc->active_list, list) {
         list_del(&t_desc->list);
         gl_free(t_desc->kernel_addr); 
         kfree(t_desc);
     }
-
+    
     list_for_each_entry_safe(t_desc, t_tmp, &alloc->free_list, list) {
         list_del(&t_desc->list);
         kfree(t_desc);
     }
-
+    
     if (alloc->mm) {
         mmdrop(alloc->mm);
     }
-
+    
     kfree(alloc);
 }
 
@@ -214,6 +241,11 @@ static void alloc_put(struct sa_allocator_desc *alloc) {
     kref_put(&alloc->kref, alloc_destroy_callback);
 }
 
+/// @brief Creates a new allocator for the thread group `tgid`
+/// @param tgid 
+/// @param mm 
+/// @return NULL if it cannot allocate memory for the allocator or already exists one for the thread group, the pointer to the newly created
+///         allocator otherwise.
 struct sa_allocator_desc* alloc_create(pid_t tgid, struct mm_struct *mm) {
     struct sa_allocator_desc *alloc;
     long err;
@@ -263,14 +295,18 @@ static struct sa_allocator_desc *alloc_get(pid_t tgid) {
         rcu_read_unlock();
         return alloc;
     }
+    
     rcu_read_unlock();
     return NULL;
 }
 
+/// @brief Creates a new shadow area mapping for the current calling thread. The user-space virtual address is saved
+///        to `vaddr`.
+/// @param vaddr 
+/// @return 0 on success, < 0 otherwise.
 long sa_alloc(uint64_t *vaddr) {
     struct sa_thread_desc *t_desc;
     struct sa_allocator_desc *alloc;
-    long err;
     uint64_t usr_addr;
     void *kernel_addr;
     unsigned long offset;
@@ -290,51 +326,50 @@ long sa_alloc(uint64_t *vaddr) {
 
     usr_addr = alloc_get_free_vaddr(alloc);
     if (usr_addr >= SS_END) {
-        alloc_put(alloc);
-        return -ENOMEM;
-    }
-
-    kernel_addr = gl_vmalloc();
-    if (!kernel_addr) {
         kfree(t_desc);
         alloc_put(alloc);
         return -ENOMEM;
     }
 
-    init_ss(kernel_addr, usr_addr);
+    kernel_addr = gl_vmalloc();
     t_desc->tid = current->pid;
     t_desc->usr_addr = usr_addr;
     t_desc->kernel_addr = kernel_addr;
+    if (!kernel_addr) {
+        alloc_freelist_add(alloc, &t_desc->list);
+        alloc_put(alloc);
+        return -ENOMEM;
+    }
 
+    init_ss(kernel_addr, usr_addr);
     mmap_write_lock(mm);
     for (offset = 0; offset < SS_SIZE; offset += PAGE_SIZE) {
         phys_addr_t phy = vmalloc_to_phy(kernel_addr + offset);
-
         err = map_ss(mm, usr_addr + offset, phy);
         if (err) {
             unsigned long rollback_off;
             for (rollback_off = 0; rollback_off < offset; rollback_off += PAGE_SIZE) {
                 unmap_ss_page(mm, usr_addr + rollback_off);
             }
+
             my_flush_tlb_mm(mm);
             mmap_write_unlock(mm);
-
+            gl_free(kernel_addr);
+            t_desc->kernel_addr = NULL;
             alloc_freelist_add(alloc, &t_desc->list);
             alloc_put(alloc);
             return -ENOMEM;
         }
     }
-    mmap_write_unlock(mm);
 
+    mmap_write_unlock(mm);
     alloc_add_t(alloc, t_desc);
     *vaddr = usr_addr;
-
     my_flush_tlb_mm(mm);
-
     return 0;
 }
 
-long sa_free(uint64_t usr_addr){
+long sa_free(uint64_t usr_addr) {
     struct sa_allocator_desc *alloc;
     struct sa_thread_desc *t_desc, *tmp;
     struct mm_struct *mm = current->mm;
@@ -399,12 +434,13 @@ static long sa_copy(
             break;
         }
     }
+    
     up_read(&alloc->al_lock);
-
     alloc_put(alloc);
     if (!found) {
         return -ENOENT;
     }
+
     atomic64_set(&c_alloc->free_area, c_t->usr_addr + SS_SIZE);
     alloc_add_t(c_alloc, c_t);
 
@@ -439,7 +475,6 @@ long sa_fork(pid_t p_tgid, pid_t p_pid) {
 
     t_desc->kernel_addr = c_stack;
     t_desc->tid = current->pid;
-
     err = sa_copy(p_tgid, p_pid, c_alloc, t_desc);
     if (err < 0) {
         goto no_parent;
@@ -462,10 +497,9 @@ long sa_fork(pid_t p_tgid, pid_t p_pid) {
             goto no_map;
         }
     }
+    
     mmap_write_unlock(child_mm);
-
     my_flush_tlb_mm(child_mm);
-
     return 0;
 
 no_map:
@@ -490,7 +524,6 @@ void vma_free(void) {
     list_splice_init(&global_vma_list, &old_list);
     global_vma_list_size = 0;
     spin_unlock(&global_vma_lock);
-
     list_for_each_entry_safe(it, tmp, &old_list, list) {
         vfree(it->kernel_addr);
         kfree(it);
