@@ -76,13 +76,13 @@
             "intelliSenseMode": "linux-gcc-x64"
         },
         {
-            "name": "lkm-fedora",
+            "name": "lkm-fedora[desktop]",
             "includePath": [
                 "${workspaceFolder}/**",
-                "/usr/src/kernels/6.19.13-100.fc42.x86_64/include",
-                "/usr/src/kernels/6.19.13-100.fc42.x86_64/arch/x86/include",
-                "/usr/src/kernels/6.19.13-100.fc42.x86_64/arch/x86/include/generated",
-                "/usr/src/kernels/6.19.13-100.fc42.x86_64/include/generated"
+                "/usr/src/kernels/6.19.14-108.fc42.x86_64/include",
+                "/usr/src/kernels/6.19.14-108.fc42.x86_64/arch/x86/include",
+                "/usr/src/kernels/6.19.14-108.fc42.x86_64/arch/x86/include/generated",
+                "/usr/src/kernels/6.19.14-108.fc42.x86_64/include/generated"
             ],
             "defines": [
                 "__KERNEL__",
@@ -95,7 +95,37 @@
                 "CONFIG_PAGE_OFFSET=0xffff888000000000UL"
             ],
             "forcedInclude": [
-                "/usr/src/kernels/6.19.13-100.fc42.x86_64/include/linux/kconfig.h"
+                "/usr/src/kernels/6.19.14-108.fc42.x86_64/include/linux/kconfig.h"
+            ],
+            "compilerArgs": [
+                "-nostdinc"
+            ],
+            "compilerPath": "/usr/bin/gcc",
+            "cStandard": "gnu11",
+            "intelliSenseMode": "linux-gcc-x64"
+        },
+        {
+            "name": "lkm-fedora[home::vm]",
+            "includePath": [
+                "${workspaceFolder}/**",
+                "/usr/src/kernels/7.0.10-201.fc44.x86_64/include",
+                "/usr/src/kernels/7.0.10-201.fc44.x86_64/arch/x86/include",
+                "/usr/src/kernels/7.0.10-201.fc44.x86_64/arch/x86/include/generated",
+                "/usr/src/kernels/7.0.10-201.fc44.x86_64/include/generated",
+                "/usr/src/kernels/7.0.10-201.fc44.x86_64/include/generated/uapi",
+                "/usr/src/kernels/7.0.10-201.fc44.x86_64/include/uapi/asm-generic/"
+            ],
+            "defines": [
+                "__KERNEL__",
+                "MODULE",
+                "CONFIG_X86_64",
+                "CONFIG_X86",
+                "BITS_PER_LONG=64",
+                "CONFIG_PGTABLE_LEVELS=4",
+                "CONFIG_PAGE_OFFSET=0xffff888000000000UL"
+            ],
+            "forcedInclude": [
+                "/usr/src/kernels/7.0.10-201.fc44.x86_64/include/linux/kconfig.h"
             ],
             "compilerArgs": [
                 "-nostdinc"
@@ -129,7 +159,36 @@
             "cStandard": "c17",
             "cppStandard": "c++17",
             "intelliSenseMode": "linux-clang-x64"
-        }
+        },
+        {
+            "name": "lkm[home]",
+            "includePath": [
+                "${workspaceFolder}/**",
+                "/usr/src/kernels/7.0.10-201.fc44.x86_64/include",
+                "/usr/src/kernels/7.0.10-201.fc44.x86_64/arch/x86/include",
+                "/usr/src/kernels/7.0.10-201.fc44.x86_64/arch/x86/include/generated",
+                "/usr/src/kernels/7.0.10-201.fc44.x86_64/include/generated"
+            ],
+            "defines": [
+                "__KERNEL__",
+                "MODULE",
+                "KBUILD_MODNAME=\"throttle\"",
+                "CONFIG_X86_64",
+                "CONFIG_X86",
+                "BITS_PER_LONG=64",
+                "CONFIG_PGTABLE_LEVELS=4",
+                "CONFIG_PAGE_OFFSET=0xffff888000000000UL"
+            ],
+            "forcedInclude": [
+                "/usr/src/kernels/7.0.10-201.fc44.x86_64/include/linux/kconfig.h"
+            ],
+            "compilerArgs": [
+                "-nostdinc"
+            ],
+            "compilerPath": "/usr/bin/gcc",
+            "cStandard": "gnu11",
+            "intelliSenseMode": "linux-gcc-x64"
+        },
     ],
     "version": 4
 }

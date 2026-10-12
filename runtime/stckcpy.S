@@ -1,28 +1,41 @@
-.equ STACK_SIZE, 0x800000
-.equ ADR_HINT, 0x600000000000
+.equ STACK_SIZE,         0x800000
+.equ ADR_HINT,           0x600000000000
+.equ IOCTL_SHADOW_PIVOT, 0xc018ca73
+.equ __NR_OPEN,          2
+.equ __NR_CLOSE,         3
+.equ __NR_MMAP,          9
+.equ __NR_IOCTL,         16
+.equ __NR_EXIT,          60
 .global relocate_stack
 .extern _start
 
-relocate_stack:
-    mov %rdx, %r12 # save dl_fini
+.section .rodata
+dev_name: .asciz "/dev/shadowstack"
 
-    mov $9, %rax # __NR_MMAP
-    movabs $ADR_HINT, %rdi
-    mov $STACK_SIZE, %rsi
-    mov $3, %rdx # PROT_READ | PROT_WRITE
-    mov $34, %r10 # MAP_ANONYMOUS | MAP_PRIVATE
-    mov $-1, %r8
-    xor %r9, %r9
+.section .text
+relocate_stack:
+    mov     %rdx,       %r12 # save dl_fini
+
+    mov    $__NR_MMAP,  %rax
+    movabs $ADR_HINT,   %rdi
+    mov    $STACK_SIZE, %rsi
+    mov    $3,          %rdx # PROT_READ | PROT_WRITE
+    mov    $34,         %r10 # MAP_ANONYMOUS | MAP_PRIVATE
+    mov    $-1,         %r8
+    xor    %r9,         %r9
     syscall
 
-    xor %rdi, %rdi # M
-    xor %r11, %r11 # AT_RANDOM vec
-    mov %rsp, %r8
-    lea 8(%r8), %r8
+    test   %rax, %rax
+    jz     _out
+
+    xor    %rdi, %rdi # M
+    xor    %r11, %r11 # AT_RANDOM vec
+    mov    %rsp, %r8
+    lea  8(%r8), %r8
 
 _scan_argv:
-    mov (%r8), %r9
-    test %r9, %r9
+    mov   (%r8), %r9
+    test   %r9, %r9
     jz _scan_argv_exit
 
     cmp %rdi, %r9
@@ -159,13 +172,13 @@ _patch_auxv:
     test %r11, %r11
     jz _patch_auxv_exit # exit if AT_NULL
 
-    cmp $7, %r9 # AT_BASE
+    cmp $7, %r11 # AT_BASE
     je _do_patch_auxp
-    cmp $15, %r9 # AT_PLATFORM
+    cmp $15, %r11 # AT_PLATFORM
     je _do_patch_auxp
-    cmp $25, %r9 # AT_RANDOM
+    cmp $25, %r11 # AT_RANDOM
     je _do_patch_auxp
-    cmp $31, %r9 # AT_EXECFN
+    cmp $31, %r11 # AT_EXECFN
     je _do_patch_auxp
     jmp _patch_inc_auxv
 
@@ -179,6 +192,50 @@ _patch_inc_auxv:
     jmp _patch_auxv
 
 _patch_auxv_exit:
-    mov %rax, %rsp
+    mov %rsp, %r15 # %r15 = old stack pointer
+    mov %rax, %rsp # %rax = new stack area
+    mov %rax, %r14 # %r14 = new stack area (scratch variable)
+
+    mov $__NR_OPEN, %rax
+    lea dev_name(%rip), %rdi
+    mov $2, %rsi # O_RDWR
+    xor %rdx, %rdx
+    syscall
+
+    test %rax, %rax
+    js   _out
+
+    mov %rax, %r13
+
+    sub  $24,     %rsp
+    movq $0,     (%rsp)
+    mov  %r14,  8(%rsp)
+    mov  %r15, 16(%rsp)
+    mov  %rsp,    %rdx
+
+    mov    $__NR_IOCTL, %rax # __NR_ioctl
+    mov    %r13, %rdi
+    movabs $IOCTL_SHADOW_PIVOT, %rsi
+    syscall
+
+    test %rax, %rax
+    js _out2
+
+    add $24, %rsp
+
+    mov $__NR_CLOSE, %rax   # __NR_close
+    mov %r13, %rdi 
+    syscall
+
     mov %r12, %rdx
     jmp _start
+
+_out2:
+    mov $__NR_EXIT, %rax
+    mov %r13, %rdi
+    syscall
+
+_out:
+    mov $__NR_EXIT, %rax # __NR_exit
+    mov $1,  %rdi
+    syscall

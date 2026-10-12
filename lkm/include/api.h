@@ -39,6 +39,8 @@ long sa_free(uint64_t addr);
 
 long sa_fork(pid_t p_tgid, pid_t p_pid);
 
+long sa_pivot(uint64_t rsp, uint64_t new_stack_address);
+
 long resolve_symbols(void);
 
 void vma_free(void);
