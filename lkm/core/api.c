@@ -1,239 +1,319 @@
 #include "api.h"
 #include "pt_bindings.h"
+#include <linux/highmem.h>
 #include <linux/io.h>
 #include <linux/mm.h>
+#include <linux/mmzone.h>
+#include <linux/pgtable.h>
 #include <linux/printk.h>
 #include <linux/slab.h>
 #include <linux/string.h>
+#include <linux/types.h>
+#include <linux/version.h>
 #include <linux/vmalloc.h>
-#include <linux/xarray.h>
-/// Maximum size of @global_vma_list 
+
+/// Maximum size of @gl_sa
 #define VMA_CAPACITY (128)
 
-struct gl_vma_desc {
-    void              *kernel_addr;
-    struct list_head   list;
+/// @brief Holds the kernel address of the memory region used as a shadow memory area.
+struct sa_pagelist {
+    int                nr_pages;
+    struct page      **pages;
+    struct list_head   list; // gl_sa 
 };
 
-static int global_vma_list_size = 0;
-static LIST_HEAD(global_vma_list);
-static DEFINE_SPINLOCK(global_vma_lock);
+static int gl_size = 0;
+static LIST_HEAD(gl_sa);
+static DEFINE_SPINLOCK(gl_lock);
 
 /// @brief "shadow area" thread descriptor holds the virtual address (`vaddr`) of the user space the thread `tid` use as the shadow stack
-/// and the kernel address of the region where the shadow stack resides.
+/// and the kernel address of the region where the shadow stack resides. This object can be part of:
+/// - the active list: a thread is currently running and associated with a shadow stack
+/// - the free list: a thread released the shadow stack, only `addr` is valid (we are reusing the struct to avoid another allocation)
 struct sa_thread_desc {
-    pid_t              tid;
-    uint64_t           usr_addr;
-    void              *kernel_addr;
-    struct list_head   list;
+    pid_t               tid;
+    uint64_t            addr;
+    struct sa_pagelist *pagelist;
 };
 
 static DEFINE_XARRAY(sa_allocators);
 
-/// @brief Prepares the shadow stack area to be used by the user space thread. When using a direct-mapping strategy this function is a no-op.
-/// @param kernel_addr 
-/// @param usr_addr 
-static void init_ss(void *kernel_addr, uint64_t usr_addr) {
+struct sa_batch {
+    unsigned int  nr;
+    void         *tables[];
+};
+#define MAX_BATCH_TABLES ((PAGE_SIZE - sizeof(struct sa_batch)) / sizeof(void*))
+
+/// @brief Auxiliary struct to keep track of the pages holding a page table to be freed
+struct sa_tlb {
+    struct mm_struct *mm;
+    unsigned long     start;
+    unsigned long     end;
+    bool              free_tables;
+    bool              clear_ptes;
+    bool              clear_pmds;
+    bool              clear_puds;
+    bool              clear_p4ds;
+    struct sa_batch   batch;
+};
+
+static inline void sa_pagelist_free_pages(struct sa_pagelist *pagelist) {
+    while (pagelist->nr_pages--) {
+        __free_page(pagelist->pages[pagelist->nr_pages]);
+    }
+
+    kvfree(pagelist->pages);
+    pagelist->pages = NULL;
+}
+
+static inline void sa_pagelist_free(struct sa_pagelist *pagelist) {
+    sa_pagelist_free_pages(pagelist);
+    kfree(pagelist);
+}
+
+/// @brief Allocates `nr_pages` pages and saves them in `pagelist`. The page array in pagelist can contain
+///        up to `nr_pages` 0-order pages.
+/// @return 0 on success, <0 otherwise.
+static long sa_pagelist_alloc_pages(gfp_t gfp, unsigned long nr_pages, struct sa_pagelist *pagelist) {
+    unsigned long nr_allocated;
+    unsigned long nr_remaining;
+    unsigned int max_attempt_order;
+    struct page *page;
+    int i;
+    unsigned int large_order;
+
+    pagelist->pages = kvcalloc(nr_pages, sizeof(struct page*), GFP_KERNEL);
+    if (!pagelist->pages) return -ENOMEM;
+    
+    nr_allocated = 0;
+#if LINUX_VERSION_CODE < KERNEL_VERSION(6, 8, 0)
+    max_attempt_order = MAX_ORDER;
+#else
+    max_attempt_order = MAX_PAGE_ORDER;
+#endif
+    nr_remaining = nr_pages;
+    large_order = min_t(unsigned int, max_attempt_order, ilog2(nr_remaining));
+    while (large_order > 0 && nr_remaining) {
+        // Try to get high order pages without triggering a reclaim if no pages
+        // are available
+        page = alloc_pages((gfp | __GFP_NOWARN) & ~__GFP_DIRECT_RECLAIM, large_order);
+        if (unlikely(!page)) {
+            max_attempt_order = --large_order;
+            continue;
+        }
+
+        split_page(page, large_order);
+        for (i = 0; i < (1U << large_order); ++i)
+            pagelist->pages[nr_allocated + i] = page + i;
+
+        nr_allocated += 1U << large_order;
+        nr_remaining = nr_pages - nr_allocated;
+        large_order = min_t(unsigned int, max_attempt_order, ilog2(nr_remaining));
+    }
+
+    while (nr_allocated < nr_pages) {
+        unsigned int nr;
+        unsigned int nr_pages_request;
+
+        nr_pages_request = min(100UL, nr_pages - nr_allocated);
+#if LINUX_VERSION_CODE < KERNEL_VERSION(6, 14, 0)
+        nr = alloc_pages_bulk_array(gfp, nr_pages_request, pagelist->pages + nr_allocated);
+#else
+        nr = alloc_pages_bulk(gfp, nr_pages_request, pagelist->pages + nr_allocated);
+#endif
+        nr_allocated += nr;
+        if (nr != nr_pages_request) break;
+    }
+
+    while (nr_allocated < nr_pages) {
+        // If previous requests have failed becase of an OOM signal, it's useless to retry more allocation requests
+        if (fatal_signal_pending(current)) break;
+
+        page = alloc_pages(gfp, 0);
+        if (unlikely(!page)) break;
+
+        pagelist->pages[nr_allocated++] = page;
+    }
+
+    pagelist->nr_pages = nr_allocated;
+    if (nr_allocated != nr_pages) {
+        sa_pagelist_free_pages(pagelist);
+        return -ENOMEM;
+    }
+    return 0;
 }
 
 /// @brief Creates a new virtual kernel memory mapping or recycle an old one not currently used (put in a free list).
-///        The underlying pages are zeroed before return the address to the caller.
-/// @return 
-static void *gl_vmalloc(void) {
-    struct gl_vma_desc *desc;
-    void *kaddr;
+///        The underlying pages are zeroed (is it really necessary?) before return the address to the caller.
+/// @return 0 on success, <0 otherwise.
+static long gl_alloc_stack(struct sa_pagelist **p) {
+    struct sa_pagelist *pagelist;
+    unsigned long nr_pages;
+    long err;
 
-    spin_lock(&global_vma_lock);
-    desc = list_first_entry_or_null(&global_vma_list, struct gl_vma_desc, list);
-    if (desc) {
-        global_vma_list_size--;
-        list_del(&desc->list);
-        spin_unlock(&global_vma_lock);
-
-        kaddr = desc->kernel_addr;
-        kfree(desc);
-
-        memset(kaddr, 0, SS_SIZE);
-        return kaddr;
+    spin_lock(&gl_lock);
+    pagelist = list_first_entry_or_null(&gl_sa, struct sa_pagelist, list);
+    if (pagelist) {
+        gl_size--;
+        list_del(&pagelist->list);
+        spin_unlock(&gl_lock);
+        *p = pagelist;
+        return 0;
     }
 
-    spin_unlock(&global_vma_lock);
-    return vzalloc(SS_SIZE);
+    spin_unlock(&gl_lock);
+    pagelist = kmalloc(sizeof(*pagelist), GFP_KERNEL);
+    if (!pagelist) return -ENOMEM;
+
+    nr_pages = SS_SIZE >> PAGE_SHIFT;
+    err = sa_pagelist_alloc_pages(GFP_KERNEL | __GFP_ZERO, nr_pages, pagelist);
+    if (err) {
+        kfree(pagelist);
+        return err;
+    }
+
+    *p = pagelist;
+    return 0;
 }
 
 /// @brief Tries to add a kernel memory region to the global free list so other thread can reuse it
-///        instead of using `vzalloc()`. The insertion might fail if the free list is full or there is no
-///        memory to create the list's node.
-/// @param kaddr 
-static void gl_free(void *kaddr) {
-    struct gl_vma_desc *desc;
+///        instead of using `vzalloc()`. The insertion might fail if the free list is full, in that case
+///        the pages will be released
+static void gl_free(struct sa_pagelist *pagelist) {
+    int i;
 
-    if (global_vma_list_size >= VMA_CAPACITY) {
-        vfree(kaddr);
+    if (gl_size >= VMA_CAPACITY) {
+        sa_pagelist_free(pagelist);
         return;
     }
-    
-    desc = kmalloc(sizeof(*desc), GFP_KERNEL);
-    if (!desc) {
-        vfree(kaddr);
-        return;
+
+    for (i = 0; i < pagelist->nr_pages; ++i) {
+        clear_highpage(pagelist->pages[i]);
     }
-    
-    desc->kernel_addr = kaddr;
-    spin_lock(&global_vma_lock);
-    global_vma_list_size++;
-    list_add(&desc->list, &global_vma_list);
-    spin_unlock(&global_vma_lock);
+
+    spin_lock(&gl_lock);
+    gl_size++;
+    list_add(&pagelist->list, &gl_sa);
+    spin_unlock(&gl_lock);
 }
 
-/// @brief Modifies the thread's page table to map user space shadow area virtual address to the
-///        physical pages allocated via `vzalloc()`. 
-/// @param mm virtual memory struct associated to the user space instrumented thread
-/// @param vaddr user space address to associate with `phy`
-/// @param phy page physical address
-/// @return 0 on success, < 0 otherwise.
-static long map_ss(struct mm_struct *mm, uint64_t vaddr, phys_addr_t phy) {
-    pgd_t *pgd;
-    p4d_t *p4d;
-    pud_t *pud;
+static void free_pte_range(struct sa_tlb *tlb, pmd_t *pmd,
+                        unsigned long addr, unsigned long end) {
+    pgtable_t pte = pmd_pgtable(pmd);
+    pmd_clear(pmd);
+    if (!tlb->batch) {
+        tlb->batch = alloc_page(GFP_NOWAIT);
+        if (!tlb->batch) {
+            __free_page(pte);
+        }
+        tlb->batch.nr = 0;
+    }
+
+    tlb->batch.tables[tlb->batch.nr++] = pte;
+    if (tlb->batch.nr == MAX_BATCH_TABLES) {
+        int i;
+
+        for (i = 0; i < tlb->batch.nr; ++i) {
+            __free_page(tlb->batch.tables[i]);
+        }
+    }
+    mm_dec_nr_ptes(tlb->mm);
+}
+
+static void free_pmd_range(struct sa_tlb *batch, pud_t *pud,
+                        unsigned long addr, unsigned long end) {
     pmd_t *pmd;
-    pte_t *pte;
-    spinlock_t *ptl;
-    int err;
-
-    pgd = pgd_offset(mm, vaddr);
-    p4d = my_p4d_alloc(mm, pgd, vaddr);
-    if (!p4d) {
-        pr_err("p4d_alloc() failed");
-        err = -ENOMEM;
-        goto out;
-    }
-    pud = my_pud_alloc(mm, p4d, vaddr);
-    if (!pud) {
-        pr_err("pud_alloc() failed");
-        err = -ENOMEM;
-        goto out;
-    }
-    pmd = my_pmd_alloc(mm, pud, vaddr);
-    if (!pmd) {
-        pr_err("pmd_alloc() failed");
-        err = -ENOMEM;
-        goto out;
-    }
-    pte = my_pte_alloc_map_lock(mm, pmd, vaddr, &ptl);
-    if (!pte) {
-        pr_err("my_pte_offset_map_lock() failed");
-        err = -ENOMEM;
-        goto out;
-    }
-
-    set_pte_at(mm, vaddr, pte, pfn_pte(phy >> PAGE_SHIFT, PAGE_SHARED));
-    pte_unmap_unlock(pte, ptl);
-    err = 0;
-
-out:
-    return err;
-}
-
-static uint64_t vmalloc_to_phy(void *addr) {
-    struct page *p;
-    phys_addr_t phy;
-
-    p = vmalloc_to_page(addr);
-    if (!p) return 0;
-
-    phy = page_to_phys(p);
-    return phy + offset_in_page(addr);
-}
-
-/// @brief Adds a new thread descriptor to the allocator.
-/// @param alloc 
-/// @param t 
-static void alloc_add_t(struct sa_allocator_desc *alloc, struct sa_thread_desc *t) {
-    down_write(&alloc->al_lock);
-    list_add(&t->list, &alloc->active_list);
-    up_write(&alloc->al_lock);
-}
-
-/// @brief Fetches the next user space address where the shadow area will be mapped to in user space.
-///        The address might be retrieved from the free list if there is one or from the bump counter
-///        if the free list is empty. If the address is retrieved by the bump counter it might be invalid
-///        because the address might surpass the valid virtual memory region reserved for the shadow stack, in
-///        practice this might be unlikely (caller must check if the virtual address is valid).
-/// @param alloc 
-/// @return an 8 byte address
-static uint64_t alloc_get_free_vaddr(struct sa_allocator_desc *alloc) {
-    struct sa_thread_desc *desc;
-    uint64_t vaddr;
-
-    spin_lock(&alloc->fl_lock);
-    desc = list_first_entry_or_null(&alloc->free_list, struct sa_thread_desc, list);
-    if (desc) {
-        vaddr = desc->usr_addr;
-        list_del(&desc->list);
-        spin_unlock(&alloc->fl_lock);
-        kfree(desc);
-        return vaddr;            
-    }
+    unsigned long next;
+    unsigned long start;
     
-    spin_unlock(&alloc->fl_lock);
-    return atomic64_fetch_add(SS_SIZE, &alloc->free_area);
+    start = addr;
+    pmd = pmd_offset(pud);
+    do {
+        next = pmd_addr_end(addr, end);
+        if (pmd_none_or_clear_bad(pmd)) continue;
+
+        free_pte_range(batch, pmd, addr);
+    } while (pmd++, addr = next, addr != end);
 }
 
-static void alloc_freelist_add(struct sa_allocator_desc *alloc, struct list_head *list) {
-    spin_lock(&alloc->fl_lock);
-    list_add(list, &alloc->free_list);
-    spin_unlock(&alloc->fl_lock);
-}
-
-static void unmap_ss_page(struct mm_struct *mm, uint64_t vaddr) {
-    pgd_t *pgd;
-    p4d_t *p4d;
+static void free_pud_range(struct sa_tlb *batch, p4d_t *p4d,
+                        unsigned long addr, unsigned long end) {
     pud_t *pud;
-    pmd_t *pmd;
-    pte_t *ptep;
-    spinlock_t *ptl;
+    unsigned long next;
+    unsigned long start;
 
-    pgd = pgd_offset(mm, vaddr);
-    if (pgd_none(*pgd) || pgd_bad(*pgd)) return;
-    
-    p4d = p4d_offset(pgd, vaddr);
-    if (p4d_none(*p4d) || p4d_bad(*p4d)) return;
-    
-    pud = pud_offset(p4d, vaddr);
-    if (pud_none(*pud) || pud_bad(*pud)) return;
-    
-    pmd = pmd_offset(pud, vaddr);
-    if (pmd_none(*pmd) || pmd_bad(*pmd)) return;
+    start = addr;
+    pud = pud_offset(p4d, addr);
+    do {
+        next = pud_addr_end(addr, end);
+        if (pud_none_or_clear_bad(pud)) continue;
 
-    ptep = my_pte_offset_map_lock(mm, pmd, vaddr, &ptl);
-    if (!ptep) return;
+        free_pmd_range(batch, pud, addr, next);
+    } while (pud++, addr = next, addr != next);
+}
 
-    pte_clear(mm, vaddr, ptep);
-    pte_unmap_unlock(ptep, ptl);
+static void free_p4d_range(struct ss_tbl_batch *batch, pgd_t *pgd,
+                        unsigned long addr, unsigned long end) {
+    p4d_t *p4d;
+    unsigned long next;
+    unsigned long start;
+
+    start = addr;
+    p4d = p4d_offset(pgd, addr);
+    do {
+        next = p4d_addr_end(addr, end);
+        if (p4d_none_or_clear_bad(p4d)) continue;
+
+        free_pud_range(batch, p4d, addr, next);
+    } while (p4d++, addr = next, addr != end);
+
+    p4d = p4d_offset(pgd, start);
+    pgd_clear(pgd);
+}
+
+static void batch_add(struct sa_batch *batch, void *tbl) {
+    if (!batch->tables) {
+        void *p = alloc_page(GFP_KERNEL);
+        if (!p) return;
+
+        batch->tables = p;
+        batch->nr = 0;
+    }
+    batch->tables[batch->nr++] = tbl;
+}
+
+/// @brief Unmap and free page tables in the range [addr, end). It assumes that all the relevant PTE entries have been
+///        already zeroed.
+/// @param mm 
+/// @param addr virtual address start
+/// @param end virtual address end
+static void free_pgd_range(struct mm_struct *mm, unsigned long addr, unsigned long end) {
+    pgd_t *pgd;
+    unsigned long next;
+    struct sa_tlb batch;
+
+    mmap_assert_write_locked(mm);
+    pgd = pgd_offset(mm, addr);
+    do {
+        next = pgd_addr_end(addr, end);
+        if (pgd_none_or_clear_bad(pgd)) continue;
+
+        free_p4d_range(mm, pgd, addr, next);
+    } while (pgd++, addr = next, addr != end);
 }
 
 static void alloc_destroy_callback(struct kref *kref) {
     struct sa_allocator_desc *alloc;
-    struct sa_thread_desc *t_desc;
-    struct sa_thread_desc *t_tmp;
-    
+
     alloc = container_of(kref, struct sa_allocator_desc, kref);
-    list_for_each_entry_safe(t_desc, t_tmp, &alloc->active_list, list) {
-        list_del(&t_desc->list);
-        gl_free(t_desc->kernel_addr); 
-        kfree(t_desc);
-    }
-    
-    list_for_each_entry_safe(t_desc, t_tmp, &alloc->free_list, list) {
-        list_del(&t_desc->list);
-        kfree(t_desc);
-    }
-    
+    WARN_ONCE(!xa_empty(alloc->threads), "allocator's ref count reached zero with one or more threads running");
     if (alloc->mm) {
+        mmap_write_lock(alloc->mm);
+        free_pgd_range(alloc->mm, SS_START, SS_START + SS_SIZE);
+        mmap_write_unlock(alloc->mm);
         mmdrop(alloc->mm);
     }
-    
+
     kfree(alloc);
 }
 
@@ -242,11 +322,11 @@ static void alloc_put(struct sa_allocator_desc *alloc) {
 }
 
 /// @brief Creates a new allocator for the thread group `tgid`
-/// @param tgid 
-/// @param mm 
+/// @param tgid
+/// @param mm
 /// @return NULL if it cannot allocate memory for the allocator or already exists one for the thread group, the pointer to the newly created
 ///         allocator otherwise.
-struct sa_allocator_desc* alloc_create(pid_t tgid, struct mm_struct *mm) {
+struct sa_allocator_desc *alloc_create(pid_t tgid, struct mm_struct *mm) {
     struct sa_allocator_desc *alloc;
     long err;
 
@@ -259,17 +339,13 @@ struct sa_allocator_desc* alloc_create(pid_t tgid, struct mm_struct *mm) {
     alloc->tgid = tgid;
     alloc->mm = mm;
     init_rwsem(&alloc->al_lock);
-    spin_lock_init(&alloc->fl_lock);
-    atomic64_set(&alloc->free_area, SS_START);
-    INIT_LIST_HEAD(&alloc->free_list);
-    INIT_LIST_HEAD(&alloc->active_list);
+    xa_init_flags(&alloc->threads, XA_FLAGS_ALLOC);
     kref_init(&alloc->kref);
-
     err = xa_insert(&sa_allocators, tgid, alloc, GFP_KERNEL);
     if (err) {
         kfree(alloc);
         if (err == -EBUSY) {
-            pr_err("Allocator for TGID %d does already exists", tgid);
+            pr_err("allocator for tgid %d does already exists", tgid);
         }
         pr_err("cannot insert allocator for %d", tgid);
         return NULL;
@@ -295,237 +371,317 @@ static struct sa_allocator_desc *alloc_get(pid_t tgid) {
         rcu_read_unlock();
         return alloc;
     }
-    
+
     rcu_read_unlock();
     return NULL;
 }
 
+static long map_pte_range(struct mm_struct *mm, pmd_t *pmd, 
+    uint64_t addr, uint64_t end, unsigned long start,
+    struct sa_pagelist *pages) {
+    pte_t *pte;
+
+    if (my_pte_alloc(mm, pmd)) return -ENOMEM;
+
+    pte = pte_offset_kernel(pmd, addr);
+    do {
+        struct page *page;
+
+        page = pages->pages[(addr - start) >> PAGE_SHIFT];
+        set_pte_at(mm, addr, pte, mk_pte(page, PAGE_SHARED));
+    } while (pte++, addr += PAGE_SIZE, addr != end);
+    return 0;
+}
+
+static long map_pmd_range(struct mm_struct *mm, pud_t *pud, 
+    unsigned long addr, unsigned long end, unsigned long start,
+    struct sa_pagelist *pages) {
+    pmd_t *pmd;
+    unsigned long next;
+
+    pmd = my_pmd_alloc(mm, pud, addr);
+    if (!pmd) return -ENOMEM;
+
+    do {
+        next = pmd_addr_end(addr, end);
+        if (map_pte_range(mm, pmd, addr, next, start, pages)) return -ENOMEM;
+    } while (pmd++, addr = next, addr != end);
+    return 0;
+}
+
+static long map_pud_range(struct mm_struct *mm, p4d_t *p4d,
+    unsigned long addr, unsigned long end, unsigned long start, 
+    struct sa_pagelist *pages) {
+    pud_t *pud;
+    unsigned long next;
+
+    pud = my_pud_alloc(mm, p4d, addr);
+    if (!pud) return -ENOMEM;
+
+    do {
+        next = pud_addr_end(addr, end);
+        if (map_pmd_range(mm, pud, addr, next, start, pages)) return -ENOMEM;
+    } while (pud++, addr = next, addr != end);
+    return 0;
+}
+
+static long map_p4d_range(struct mm_struct *mm, pgd_t *pgd, 
+    unsigned long addr, unsigned long end, unsigned long start, 
+    struct sa_pagelist *pages) {
+    p4d_t *p4d;
+    unsigned long next;
+
+    p4d = my_p4d_alloc(mm, pgd, addr);
+    if (!p4d) return -ENOMEM;
+
+    do {
+        next = p4d_addr_end(addr, end);
+        if (map_pud_range(mm, p4d, addr, next, start, pages)) return -ENOMEM;
+    } while (p4d++, addr = next, addr != end);
+    return 0;
+}
+
+/// @brief Maps all the pages contained in `pages` to the range [addr, end).
+/// @return 0 on success, <0 if a table cannot be allocated
+static long map_range(struct mm_struct *mm, unsigned long addr, 
+    unsigned long end, struct sa_pagelist *pages) {
+    pgd_t *pgd;
+    unsigned long start;
+    unsigned long next;
+    long err;
+
+    mmap_assert_write_locked(mm);
+    start = addr;
+    pgd = pgd_offset(mm, addr);
+    do {
+        next = pgd_addr_end(addr, end);
+        err = map_p4d_range(mm, pgd, addr, next, start, pages);
+        if (err) break;
+    } while (pgd++, addr = next, addr != end);
+
+    if (err < 0) {
+        // If something goes wrong, we don't remove the tables already allocated because they can be re-used in the future
+        // by another thread that recycles the virtual address
+        unmap_range(mm, start, next);
+    }
+
+    return err;
+}
+
 /// @brief Creates a new shadow area mapping for the current calling thread. The user-space virtual address is saved
-///        to `vaddr`.
-/// @param vaddr 
+///        to `addr`.
 /// @return 0 on success, < 0 otherwise.
-long sa_alloc(uint64_t *vaddr) {
-    struct sa_thread_desc *t_desc;
-    struct sa_allocator_desc *alloc;
-    uint64_t usr_addr;
-    void *kernel_addr;
-    unsigned long offset;
+long sa_alloc(uint64_t *addr) {
     struct mm_struct *mm;
+    struct sa_allocator_desc *alloc;
+    u32 id;
+    long err;
+    struct sa_thread_desc *thread;
+    uint64_t addr;
+    struct sa_pagelist *stack;
 
     mm = current->mm;
     if (!mm) return -EINVAL;
 
-    t_desc = kmalloc(sizeof(*t_desc), GFP_KERNEL);
-    if (!t_desc) return -ENOMEM;
-
     alloc = alloc_get(current->tgid);
-    if (!alloc) {
-        kfree(t_desc);
-        return -ENOMEM;
+    if (!alloc) return -ENOMEM;
+
+    err = xa_alloc(&alloc->threads, &id, NULL, XA_LIMIT(0, THREADS_LIMIT), GFP_KERNEL);
+    if (err) {
+        alloc_put(alloc);
+        return err;
     }
 
-    usr_addr = alloc_get_free_vaddr(alloc);
-    if (usr_addr >= SS_END) {
-        kfree(t_desc);
+    thread = kmalloc(sizeof(*thread), GFP_KERNEL);
+    if (!thread) {
+        xa_erase(&alloc->threads, id);
         alloc_put(alloc);
         return -ENOMEM;
     }
 
-    kernel_addr = gl_vmalloc();
-    t_desc->tid = current->pid;
-    t_desc->usr_addr = usr_addr;
-    t_desc->kernel_addr = kernel_addr;
-    if (!kernel_addr) {
-        alloc_freelist_add(alloc, &t_desc->list);
+    addr = SS_START + (u64)id * SS_SIZE;
+    err = gl_alloc_stack(&stack);
+    if (err) {
+        xa_erase(&alloc->threads, id);
+        kfree(thread);
         alloc_put(alloc);
         return -ENOMEM;
     }
-
-    init_ss(kernel_addr, usr_addr);
+    
+    thread->tid = current->pid;
+    thread->addr = addr;
+    thread->pagelist = stack;
     mmap_write_lock(mm);
-    for (offset = 0; offset < SS_SIZE; offset += PAGE_SIZE) {
-        phys_addr_t phy = vmalloc_to_phy(kernel_addr + offset);
-        err = map_ss(mm, usr_addr + offset, phy);
-        if (err) {
-            unsigned long rollback_off;
-            for (rollback_off = 0; rollback_off < offset; rollback_off += PAGE_SIZE) {
-                unmap_ss_page(mm, usr_addr + rollback_off);
-            }
+    err = map_range(mm, addr, addr + SS_SIZE, thread->pagelist);
+    mmap_write_unlock(mm);
+    my_flush_tlb_mm(mm);
+    if (err) {
+        gl_free(thread->pagelist);
+        thread->pagelist = NULL;
+        xa_erase(&alloc->threads, id);
+        alloc_put(alloc);
+    } else {
+        xa_store(&alloc->threads, id, thread, GFP_KERNEL)
+        *addr = addr;
+    }
+    return err;
+}
 
-            my_flush_tlb_mm(mm);
-            mmap_write_unlock(mm);
-            gl_free(kernel_addr);
-            t_desc->kernel_addr = NULL;
-            alloc_freelist_add(alloc, &t_desc->list);
-            alloc_put(alloc);
-            return -ENOMEM;
-        }
+static inline int clear_pte(pte_t *pte, unsigned long addr, void *data) {
+    struct mm_struct *mm;
+
+    mm = data;
+    if (!pte_none(ptep_get(pte))) {
+        pte_clear(mm, addr, pte);
     }
 
-    mmap_write_unlock(mm);
-    alloc_add_t(alloc, t_desc);
-    *vaddr = usr_addr;
-    my_flush_tlb_mm(mm);
     return 0;
 }
 
-long sa_free(uint64_t usr_addr) {
-    struct sa_allocator_desc *alloc;
-    struct sa_thread_desc *t_desc, *tmp;
-    struct mm_struct *mm = current->mm;
-    bool found = false;
-    unsigned long offset;
+/// @brief Zeroes all the PTE entry between `addr` and `end` (and invalidates the TLB).
+static inline void unmap_range(struct mm_struct *mm, uint64_t addr, uint64_t end) {
+    mmap_assert_write_locked(mm);
+    apply_to_existing_page_range(mm, addr, end - addr, clear_pte, mm);
+    __flush_tlb_mm_range_bnd(mm, addr, end, PAGE_SHIFT, false);
+}
 
+long sa_fork(pid_t parent_tgid, pid_t parent_pid) {
+    struct mm_struct *mm;
+    struct sa_allocator_desc *child;
+    struct sa_allocator_desc *parent;
+    long err;
+    struct sa_thread_desc *thread;
+    struct sa_pagelist *stack;
+    u32 id;
+    u32 *found;
+    struct sa_thread_desc *t;
+
+    mm = current->mm;
     if (!mm) return -EINVAL;
+
+    child = alloc_get(current->tgid);
+    if (!child) return -ENOMEM;
+
+    parent = alloc_get(parent_tgid);
+    if (!parent) {
+        alloc_put(child);
+        return -ENOMEM;
+    }
+
+    thread = kmalloc(sizeof(*thread), GFP_KERNEL);
+    if (!thread) {
+        alloc_put(child);
+        alloc_put(parent);
+        return -ENOMEM;
+    }
+
+    err = gl_alloc_stack(&stack);
+    if (err) {
+        alloc_put(parent);
+        alloc_put(child);
+        return err;
+    }
+
+    down_read(&parent->al_lock);
+    thread->pagelist = stack;
+    thread->tid = current->pid;
+    found = NULL;
+    xa_for_each(&parent->threads, id, t) {
+        if (t->tid == parent_pid) {
+            struct sa_pagelist *from, *to;
+            int i;
+
+            from = t->pagelist;
+            to = thread->pagelist;
+            for (i = 0; i < from->nr_pages; ++i) {
+                copy_highpage(to->pages[i], from->pages[i]);
+            }
+            
+            found = &id;
+            break;
+        }
+    }
+
+    up_read(&parent->al_lock);
+    if (!found) {
+        gl_free(stack);
+        kfree(thread);
+        alloc_put(parent);
+        alloc_put(child);
+        return ?;
+    }
+    
+    mmap_write_lock(mm);
+    err = map_range(mm, thread->addr, thread->addr + SS_SIZE, thread->pagelist);
+    mmap_write_unlock(mm);
+    my_flush_tlb_mm(mm);
+    if (err) goto no_map;
+
+    return 0;
+
+no_map:
+    xa_erase(&child->threads, );
+no_parent:
+    gl_free(stack);
+no_vmalloc:
+    alloc_put(child);
+no_alloc:
+    kfree(thread);
+    return err;
+}
+
+/// @brief Destroy all the objects associated with a thread that used the shadow stack starting at `addr`.
+///        The address will be put in the free list.
+///        WARNING: maybe passing the t
+/// @return 0 on success, <0 if a thread associated with `addr` doesn't exist
+long sa_free(uint64_t addr) {
+    struct mm_struct *mm;
+    struct sa_allocator_desc *alloc;
+    u32 id;
+    struct sa_thread_desc *t, *err;
+
+    mm = current->mm;
+    if (!mm) return -EINVAL;
+
+    if (addr < SS_START || addr >= SS_END || (addr - SS_START) % SS_SIZE) {
+        return -EINVAL;
+    }
 
     alloc = alloc_get(current->tgid);
     if (!alloc) return -EINVAL;
 
-    down_write(&alloc->al_lock);
-    list_for_each_entry_safe(t_desc, tmp, &alloc->active_list, list) {
-        if (t_desc->usr_addr == usr_addr) {
-            list_del(&t_desc->list);
-            found = true;
-            break;
-        }
-    }
-    up_write(&alloc->al_lock);
-
-    if (!found) {
+    id = (addr - SS_START) / SS_SIZE;
+    rcu_read_lock();
+    t = xa_load(&alloc->threads, id);
+    if (!t || (err = xa_cmpxchg(&alloc->threads, id, t, XA_ZERO_ENTRY, GFP_KERNEL)) != t) {
+        rcu_read_unlock();
         alloc_put(alloc);
-        return -EINVAL;
+        return xa_err(err);
     }
 
+    rcu_read_unlock();
     mmap_write_lock(mm);
-    for (offset = 0; offset < SS_SIZE; offset += PAGE_SIZE) {
-        unmap_ss_page(mm, usr_addr + offset);
-    }
-    my_flush_tlb_mm(mm);
+    // only ptes are cleared because other threads might be using upper level tables and wasted
+    // space isn't too much anyway
+    unmap_range(mm, addr, addr + SS_SIZE);
     mmap_write_unlock(mm);
-
-    gl_free(t_desc->kernel_addr);
-    alloc_freelist_add(alloc, &t_desc->list);
+    gl_free(t->pagelist);
+    kfree(t);
     alloc_put(alloc);
-
-    return 0;
-}
-
-static long sa_copy(
-    pid_t p_tgid,
-    pid_t p_pid,
-    struct sa_allocator_desc *c_alloc,
-    struct sa_thread_desc *c_t) {
-    struct sa_allocator_desc *alloc;
-    struct sa_thread_desc *t_it;
-    bool found;
-
-    alloc = alloc_get(p_tgid);
-    if (!alloc) {
-        return -ENOENT;
-    }
-
-    found = false;
-    down_read(&alloc->al_lock);
-    list_for_each_entry(t_it, &alloc->active_list, list) {
-        if (t_it->tid == p_pid) {
-            memcpy(c_t->kernel_addr, t_it->kernel_addr, SS_SIZE);
-            c_t->usr_addr = t_it->usr_addr;
-            found = true;
-            break;
-        }
-    }
-    
-    up_read(&alloc->al_lock);
     alloc_put(alloc);
-    if (!found) {
-        return -ENOENT;
-    }
-
-    atomic64_set(&c_alloc->free_area, c_t->usr_addr + SS_SIZE);
-    alloc_add_t(c_alloc, c_t);
-
     return 0;
-}
-
-long sa_fork(pid_t p_tgid, pid_t p_pid) {
-    struct mm_struct *child_mm;
-    struct sa_thread_desc *t_desc;
-    struct sa_allocator_desc *c_alloc;
-    void *c_stack;
-    long err;
-    unsigned long offset;
-
-    child_mm = current->mm;
-    if (!child_mm) return -EINVAL;
-
-    t_desc = kmalloc(sizeof(*t_desc), GFP_KERNEL);
-    if (!t_desc) return -ENOMEM;
-
-    c_alloc = alloc_get(current->tgid);
-    if (!c_alloc) {
-        err = -ENOMEM;
-        goto no_alloc;
-    }
-
-    c_stack = gl_vmalloc();
-    if (!c_stack) {
-        err = -ENOMEM;
-        goto no_vmalloc;
-    }
-
-    t_desc->kernel_addr = c_stack;
-    t_desc->tid = current->pid;
-    err = sa_copy(p_tgid, p_pid, c_alloc, t_desc);
-    if (err < 0) {
-        goto no_parent;
-    }
-
-    mmap_write_lock(child_mm);
-    for (offset = 0; offset < SS_SIZE; offset += PAGE_SIZE) {
-        phys_addr_t phy = vmalloc_to_phy(t_desc->kernel_addr + offset);
-
-        err = map_ss(child_mm, t_desc->usr_addr + offset, phy);
-        if (err) {
-            unsigned long rollback_off;
-            for (rollback_off = 0; rollback_off < offset; rollback_off += PAGE_SIZE) {
-                unmap_ss_page(child_mm, t_desc->usr_addr + rollback_off);
-            }
-            my_flush_tlb_mm(child_mm);
-            mmap_write_unlock(child_mm);
-
-            err = -ENOMEM;
-            goto no_map;
-        }
-    }
-    
-    mmap_write_unlock(child_mm);
-    my_flush_tlb_mm(child_mm);
-    return 0;
-
-no_map:
-    down_write(&c_alloc->al_lock);
-    list_del(&t_desc->list);
-    up_write(&c_alloc->al_lock);
-no_parent:
-    gl_free(c_stack);
-no_vmalloc:
-    alloc_put(c_alloc);
-no_alloc:
-    kfree(t_desc);
-    return err;
 }
 
 void vma_free(void) {
     LIST_HEAD(old_list);
-    struct gl_vma_desc *it;
-    struct gl_vma_desc *tmp;
+    struct sa_pagelist *it;
+    struct sa_pagelist *tmp;
 
-    spin_lock(&global_vma_lock);
-    list_splice_init(&global_vma_list, &old_list);
-    global_vma_list_size = 0;
-    spin_unlock(&global_vma_lock);
+    spin_lock(&gl_lock);
+    list_splice_init(&gl_sa, &old_list);
+    gl_size = 0;
+    spin_unlock(&gl_lock);
     list_for_each_entry_safe(it, tmp, &old_list, list) {
-        vfree(it->kernel_addr);
-        kfree(it);
+        sa_pagelist_free(it);
     }
 }
