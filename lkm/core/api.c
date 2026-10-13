@@ -69,10 +69,15 @@ static inline void sa_pagelist_free(struct sa_pagelist *pagelist)
 	kfree(pagelist);
 }
 
-/// Allocates `nr_pages` pages and saves them in `pagelist`. The page array in pagelist can contain
-/// up to `nr_pages` 0-order pages.
-///
-/// Returns 0 on success, <0 otherwise.
+/**
+ * sa_pagelist_alloc_pages - Allocates `nr_pages` pages and saves them in `pagelist`. The page array in pagelist can contain
+ * up to `npages` 0-order pages.
+ * @gfp: describes the allocation context.
+ * @nr_pages: number of 0-order pages to allocate.
+ * @pagelist: pagelist to fill with the allocated pages.
+ *
+ * Returns 0 on success, <0 otherwise.
+ */
 static long sa_pagelist_alloc_pages(gfp_t gfp, unsigned long nr_pages,
 				    struct sa_pagelist *pagelist)
 {
@@ -144,9 +149,13 @@ static long sa_pagelist_alloc_pages(gfp_t gfp, unsigned long nr_pages,
 	return 0;
 }
 
-/// Creates a new virtual kernel memory mapping or recycle an old one not currently used (put in a free list).
-/// The underlying pages are zeroed (is it really necessary?) before return the address to the caller.
-/// Returns 0 on success, <0 otherwise.
+/**
+ * gl_alloc_stack - Allocates enough 0-order pages to contain a shadow stack or recycles an old one not currently used
+ * (put in a free list). The underlying pages are zeroed before returning the address to the caller.
+ * @pagelist: pagelist to fill with the allocated pages.
+ *
+ * Returns: 0 on success, <0 otherwise.
+ */
 static long gl_alloc_stack(struct sa_pagelist **p)
 {
 	struct sa_pagelist *pagelist;
@@ -180,9 +189,10 @@ static long gl_alloc_stack(struct sa_pagelist **p)
 	return 0;
 }
 
-/// Tries to add a kernel memory region to the global free list so other thread can reuse it
-/// instead of using `vzalloc()`. The insertion might fail if the free list is full, in that case
-/// the pages will be released
+/**
+ * gl_free - Tries to add a kernel memory regione to the global free list so other threads can reuse it.
+ * The insertion might fail if the free list is full, in this case the pages will be released.
+ */
 static void gl_free(struct sa_pagelist *pagelist)
 {
 	int i;
@@ -425,10 +435,6 @@ static void alloc_put(struct sa_allocator_desc *alloc)
 	kref_put(&alloc->kref, alloc_destroy_callback);
 }
 
-/// Creates a new allocator for the thread group `tgid`
-///
-/// Returns NULL if it cannot allocate memory for the allocator or already exists one for the thread group, the pointer to the newly created
-/// allocator otherwise.
 struct sa_allocator_desc *alloc_create(pid_t tgid, struct mm_struct *mm)
 {
 	struct sa_allocator_desc *alloc;
@@ -499,11 +505,11 @@ static inline int clear_pte(pte_t *pte, unsigned long addr, void *data)
 	return 0;
 }
 
-/*
+/**
  * unmap_range - Zeroes all the PTE entry between `addr` and `end` (and invalidates the TLB).
- * @mm: The mm_struct of the current process.
- * @addr: The starting address of the range to unmap.
- * @end: The ending address of the range to unmap.
+ * @mm: mm_struct of the current process.
+ * @addr: starting address of the range to unmap.
+ * @end: ending address of the range to unmap.
  *
  * Context: Process context, assumes mmap_write_lock() is held.
  */
@@ -591,15 +597,12 @@ static long map_p4d_range(struct mm_struct *mm, pgd_t *pgd, unsigned long addr,
 	return 0;
 }
 
-/// Maps all the pages contained in `pages` to the range [addr, end).
-///
-/// Returns 0 on success, <0 if a table cannot be allocated
-/*
+/**
  * map_range - Maps all the pages contained in `pages` to the range [addr, end).
- * @mm: The mm_struct of the current process.
- * @addr: The starting address of the range to map.
- * @end: The ending address of the range to map.
- * @pages: The list of pages to map.
+ * @mm: mm_struct of the current process.
+ * @addr: starting address of the range to map.
+ * @end: ending address of the range to map.
+ * @pages: list of pages to map.
  *
  * Context: Process context, assumes mmap_write_lock() is held.
  */
@@ -644,8 +647,9 @@ static inline void atomic64_max(atomic64_t *curr, s64 id)
 	}
 }
 
-/*
+/**
  * sa_alloc - Creates a new shadow area mapping for the current calling thread. The user-space virtual address is saved to `addr`.
+ * @addr: if all goes well, it will contain the logical address of the shadow stack.
  *
  * Context: Process context,
  * Returns 0 on success, < 0 otherwise.
@@ -708,6 +712,14 @@ err_put:
 	return err;
 }
 
+/**
+ * sa_fork - Creates a new shadow area mapping for the current calling thread by duplicating the parent thread's shadow stack.
+ * @parent_tgid: thread group ID of the parent thread.
+ * @parent_pid: process ID of the parent thread.
+ *
+ * Context: Process context, it issues a TLB shootdown for the current process.
+ * Returns 0 on success, <0 otherwise.
+ */
 long sa_fork(pid_t parent_tgid, pid_t parent_pid)
 {
 	struct mm_struct *mm;
@@ -798,7 +810,8 @@ err_put:
 
 /**
  * sa_free - Destroys all the objects associated with a thread that used the shadow stack starting at `addr`.
- * @addr: The starting address of the shadow stack.
+ * @addr: starting address of the shadow stack.
+ *
  * The address might be reused by another thread in the future and the pages associated with the virtual address
  * will be either put in the global free list or deallocated if the free list is full.
  * Takes mmap_write_lock() and zeroes the PTE entries in the range [addr, addr + SS_SIZE) hence issues a TLB invalidation.
@@ -812,7 +825,7 @@ long sa_free(uint64_t addr)
 	struct mm_struct *mm;
 	struct sa_allocator_desc *alloc;
 	u32 id;
-	struct sa_thread_desc *t, *err;
+	struct sa_thread_desc *t;
 
 	mm = current->mm;
 	if (!mm)
