@@ -360,7 +360,7 @@ static void free_p4d_range(struct sa_tlb *tlb, pgd_t *pgd, unsigned long addr,
 }
 
 /// Unmaps and frees page tables in the range [addr, end). It assumes that all the relevant PTE entries have been
-/// already zeroed (**`unmap_range` must've already been called**).
+/// already zeroed (`unmap_range` must've already been called).
 static void __free_pgd_range(struct sa_tlb *tlb, unsigned long addr,
 			     unsigned long end, unsigned long floor,
 			     unsigned long ceiling)
@@ -499,7 +499,14 @@ static inline int clear_pte(pte_t *pte, unsigned long addr, void *data)
 	return 0;
 }
 
-/// Zeroes all the PTE entry between `addr` and `end` (and invalidates the TLB).
+/*
+ * unmap_range - Zeroes all the PTE entry between `addr` and `end` (and invalidates the TLB).
+ * @mm: The mm_struct of the current process.
+ * @addr: The starting address of the range to unmap.
+ * @end: The ending address of the range to unmap.
+ *
+ * Context: Process context, assumes mmap_write_lock() is held.
+ */
 static inline void unmap_range(struct mm_struct *mm, uint64_t addr,
 			       uint64_t end)
 {
@@ -587,6 +594,15 @@ static long map_p4d_range(struct mm_struct *mm, pgd_t *pgd, unsigned long addr,
 /// Maps all the pages contained in `pages` to the range [addr, end).
 ///
 /// Returns 0 on success, <0 if a table cannot be allocated
+/*
+ * map_range - Maps all the pages contained in `pages` to the range [addr, end).
+ * @mm: The mm_struct of the current process.
+ * @addr: The starting address of the range to map.
+ * @end: The ending address of the range to map.
+ * @pages: The list of pages to map.
+ *
+ * Context: Process context, assumes mmap_write_lock() is held.
+ */
 static long map_range(struct mm_struct *mm, unsigned long addr,
 		      unsigned long end, struct sa_pagelist *pages)
 {
@@ -607,7 +623,7 @@ static long map_range(struct mm_struct *mm, unsigned long addr,
 
 	if (err < 0) {
 		// If something goes wrong, we don't remove the tables already allocated because they can be re-used in the future
-		// by another thread that recycles the virtual address
+		// by another thread that recycles the virtual address (and by adjacent threads too)
 		unmap_range(mm, start, next);
 	}
 
@@ -628,9 +644,12 @@ static inline void atomic64_max(atomic64_t *curr, s64 id)
 	}
 }
 
-/// Creates a new shadow area mapping for the current calling thread. The user-space virtual address is saved to `addr`.
-///
-/// Returns 0 on success, < 0 otherwise.
+/*
+ * sa_alloc - Creates a new shadow area mapping for the current calling thread. The user-space virtual address is saved to `addr`.
+ *
+ * Context: Process context,
+ * Returns 0 on success, < 0 otherwise.
+ */
 long sa_alloc(uint64_t *addr)
 {
 	struct mm_struct *mm;
@@ -772,10 +791,18 @@ long sa_fork(pid_t parent_tgid, pid_t parent_pid)
 	return err;
 }
 
-/// Destroys all the objects associated with a thread that used the shadow stack starting at `addr`.
-/// The address will be put in the free list.
-///
-/// Returns 0 on success, <0 if a thread associated with `addr` doesn't exist
+/**
+ * sa_free - Destroys all the objects associated with a thread that used the shadow stack starting at `addr`.
+ * @addr: The starting address of the shadow stack.
+ * 
+ * The address might be reused by another thread in the future and the pages associated with the virtual address
+ * will be either put in the global free list or deallocated if the free list is full.
+ * Takes mmap_write_lock() and zeroes the PTE entries in the range [addr, addr + SS_SIZE) hence issues a TLB invalidation.
+ * Drops the reference counter of the allocator associated with the thread group of the calling thread.
+ *
+ * Context: Process context.
+ * Returns 0 on success, <0 otherwise.
+ */
 long sa_free(uint64_t addr)
 {
 	struct mm_struct *mm;
