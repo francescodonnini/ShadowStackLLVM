@@ -53,5 +53,7 @@ long resolve_symbols(void) {
     if (!__pagetable_free_kernel_bnd) return -1;
 #endif
 
+    
+
     return 0;
 }

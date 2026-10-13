@@ -1,15 +1,13 @@
-LLVM_CONFIG    = /home/ubuntu/Documents/llvm-project/build/bin/llvm-config
+-include ../local.mk
+
 LLVM_BUILD_DIR = $(shell $(LLVM_CONFIG) --obj-root)
-LLVM_BIN       = $(LLVM_BUILD_DIR)/bin
+LLVM_BIN       = $(shell $(LLVM_CONFIG) --bindir)
 LLVM_CMAKE_DIR = $(LLVM_BUILD_DIR)/lib/cmake/llvm
-CC             = $(LLVM_BIN)/clang
-CXX            = $(LLVM_BIN)/clang++
+CC             = clang
+CXX            = clang++
 OPT            = $(LLVM_BIN)/opt
 LLC            = $(LLVM_BIN)/llc
 LLINK          = $(LLVM_BIN)/llvm-link
-
-PROJECT_ROOT   = /home/ubuntu/Documents/ShadowStackLLVM
-
 OML            = -O3
 
 all:
@@ -17,6 +15,7 @@ all:
 	cd build && cmake -DLLVM_DIR=$(LLVM_CMAKE_DIR) \
 		-DCMAKE_CXX_COMPILER=$(CXX) \
 		-DCMAKE_C_COMPILER=$(CC) \
+		-DCMAKE_EXPORT_COMPILE_COMMANDS=ON \
 		..
 	$(MAKE) -C build
 

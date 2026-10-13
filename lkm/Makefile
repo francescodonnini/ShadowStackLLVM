@@ -15,6 +15,7 @@ CFLAGS_main.o += -DDEBUG
 
 else
 
+KDIR      := /lib/modules/$(shell uname -r)/build
 PWD := $(CURDIR)
 BUILD_DIR := $(PWD)/build
 
@@ -22,6 +23,10 @@ all:
 	@mkdir -p "$(BUILD_DIR)"
 	@rsync -a --exclude=build/ "$(PWD)/" "$(BUILD_DIR)/"
 	$(MAKE) -C /lib/modules/$(shell uname -r)/build M="$(BUILD_DIR)" modules
+
+compdb: all
+	$(MAKE) -C $(KDIR) M="$(BUILD_DIR)" compile_commands.json
+	sed 's|$(BUILD_DIR)/|$(PWD)/|g' "$(BUILD_DIR)/compile_commands.json" > "$(PWD)/compile_commands.json"
 
 mount:
 	@insmod "$(BUILD_DIR)/shadowstack_runtime.ko"

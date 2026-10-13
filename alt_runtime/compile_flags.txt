@@ -1,0 +1,6 @@
+-xc
+-std=gnu17
+-D_GNU_SOURCE
+-pthread
+-Wall
+-Wextra

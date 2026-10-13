@@ -1,13 +1,8 @@
 #include "X86ShadowStack.h"
-#include <utility>
 #include "llvm/CodeGen/MachineFrameInfo.h"
 #include "llvm/CodeGen/MachineInstrBuilder.h"
 #include "llvm/CodeGen/TargetInstrInfo.h"
 #include "llvm/CodeGen/TargetSubtargetInfo.h"
-#include "llvm/Target/TargetIntrinsicInfo.h"
-#include "X86.h"
-#include "X86InstrInfo.h"
-#include "X86RegisterInfo.h"
 #include "MCTargetDesc/X86MCTargetDesc.h"
 
 char X86ShadowStackPass::ID = 0;
