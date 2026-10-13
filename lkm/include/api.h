@@ -1,3 +1,4 @@
+/* SPDX-License-Identifier: GPL-2.0 */
 #ifndef LKM_API_H
 #define LKM_API_H
 #include <linux/atomic.h>

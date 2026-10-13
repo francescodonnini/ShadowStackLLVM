@@ -1,6 +1,6 @@
+// SPDX-License-Identifier: GPL-2.0
 #include "chrdev.h"
 #include "chrdev_fops.h"
-#include "chrdev_ioctl.h"
 #include <linux/cdev.h>
 #include <linux/device.h>
 #include <linux/device/class.h>
@@ -31,11 +31,11 @@ static const struct file_operations ops = {
 
 #if LINUX_VERSION_CODE >= KERNEL_VERSION(6, 3, 0)
 static int my_uevent(const struct device *dev,
-		     __attribute__((unused)) struct kobj_uevent_env *env)
+		     __always_unused struct kobj_uevent_env *env)
 {
 #else
 static int my_uevent(struct device *dev,
-		     __attribute__((unused)) struct kobj_uevent_env *env)
+		     __always_unused struct kobj_uevent_env *env)
 {
 #endif
 	add_uevent_var(env, "DEVMODE=%#o", 0666);

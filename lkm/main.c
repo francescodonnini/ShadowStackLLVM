@@ -1,3 +1,4 @@
+// SPDX-License-Identifier: GPL-2.0
 #include "api.h"
 #include "chrdev.h"
 #include "debug.h"
@@ -16,20 +17,15 @@ static int __init runtime_init(void)
 		return -EINVAL;
 	}
 
-	if (resolve_symbols() < 0) {
+	if (resolve_symbols() < 0)
 		return -1;
-	}
 
 	debug_init();
 
 	err = chrdev_init();
-	if (err) {
-		goto out;
-	}
-	return err;
+	if (err)
+		debug_exit();
 
-out:
-	debug_exit();
 	return err;
 }
 

@@ -1,3 +1,4 @@
+/* SPDX-License-Identifier: GPL-2.0 */
 #ifndef LK_PT_BINDINGS_H
 #define LK_PT_BINDINGS_H
 #include <linux/mm.h>
@@ -118,31 +119,42 @@ static inline void my_pagetable_dtor_free(struct ptdesc *ptdesc)
 
 static inline void my_pte_free(struct mm_struct *mm, struct page *pte_page)
 {
-	struct ptdesc *ptdesc = page_ptdesc(pte_page);
+	struct ptdesc *ptdesc;
+
+	ptdesc = page_ptdesc(pte_page);
 	my_pagetable_dtor_free(ptdesc);
 }
 
 static inline void my_pmd_free(struct mm_struct *mm, pmd_t *pmd)
 {
-	struct ptdesc *ptdesc = page_ptdesc(virt_to_page(pmd));
+	struct ptdesc *ptdesc;
+
+	ptdesc = page_ptdesc(virt_to_page(pmd));
 	my_pagetable_dtor_free(ptdesc);
 }
 
 static inline void my_pud_free(struct mm_struct *mm, pud_t *pud)
 {
-	struct ptdesc *ptdesc = page_ptdesc(virt_to_page(pud));
+	struct ptdesc *ptdesc;
+
+	ptdesc = page_ptdesc(virt_to_page(pud));
 	my_pagetable_dtor_free(ptdesc);
 }
 
 static inline void my_p4d_free(struct mm_struct *mm, p4d_t *p4d)
 {
-	struct ptdesc *ptdesc = page_ptdesc(virt_to_page(p4d));
+	struct ptdesc *ptdesc;
+
+	ptdesc = page_ptdesc(virt_to_page(p4d));
 	my_pagetable_dtor_free(ptdesc);
 }
+
 #else
 static inline void my_pte_free(struct mm_struct *mm, struct page *pte_page)
 {
-	struct ptdesc *ptdesc = page_ptdesc(pte_page);
+	struct ptdesc *ptdesc;
+
+	ptdesc = page_ptdesc(pte_page);
 	pagetable_dtor_free(ptdesc);
 }
 

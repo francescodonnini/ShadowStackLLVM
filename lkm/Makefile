@@ -23,7 +23,7 @@ all:
 
 checkpatch:
 	@test -n "$(SRCS)" || { echo "SRCS is empty"; exit 1; }
-	$(KDIR)/scripts/checkpatch.pl --no-tree -f $(SRCS)
+	$(KDIR)/scripts/checkpatch.pl --ignore LINUX_VERSION_CODE --no-tree -f $(SRCS)
 
 compdb: all
 	$(KBUILD) compile_commands.json

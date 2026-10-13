@@ -1,3 +1,4 @@
+// SPDX-License-Identifier: GPL-2.0
 #include "debug.h"
 #include <linux/debugfs.h>
 #include <linux/init.h>
@@ -48,13 +49,12 @@ static int pgd_show(struct seq_file *m, void *v)
 	pgd = mm->pgd;
 
 	seq_printf(m, "#PID=%d\n", target_pid);
-	seq_printf(m, "index,value\n");
+	seq_puts(m, "index,value\n");
 
-	if ((unsigned long)m->private) {
+	if ((unsigned long)m->private)
 		start = KERNEL_PGD_START;
-	} else {
+	else
 		start = 0;
-	}
 
 	for (i = 0; i < 256; ++i) {
 		int index;

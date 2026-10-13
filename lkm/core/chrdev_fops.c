@@ -1,3 +1,4 @@
+// SPDX-License-Identifier: GPL-2.0
 #include "chrdev_fops.h"
 #include "api.h"
 #include "pt_bindings.h"

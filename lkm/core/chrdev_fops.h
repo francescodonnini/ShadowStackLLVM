@@ -1,3 +1,4 @@
+/* SPDX-License-Identifier: GPL-2.0 */
 #ifndef LKM_CHRDEV_FOPS_H
 #define LKM_CHRDEV_FOPS_H
 #include <linux/fs.h>

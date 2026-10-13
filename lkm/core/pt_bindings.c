@@ -1,11 +1,12 @@
+// SPDX-License-Identifier: GPL-2.0
 #include "pt_bindings.h"
 #include "api.h"
 #include <linux/kprobes.h>
 
-__p4d_alloc_t __p4d_alloc_bnd = NULL;
-__pud_alloc_t __pud_alloc_bnd = NULL;
-__pmd_alloc_t __pmd_alloc_bnd = NULL;
-__pte_alloc_t __pte_alloc_bnd = NULL;
+__p4d_alloc_t __p4d_alloc_bnd;
+__pud_alloc_t __pud_alloc_bnd;
+__pmd_alloc_t __pmd_alloc_bnd;
+__pte_alloc_t __pte_alloc_bnd;
 __pte_offset_map_lock_t __pte_offset_map_lock_bnd;
 __flush_tlb_mm_range_t __flush_tlb_mm_range_bnd;
 #if LINUX_VERSION_CODE >= KERNEL_VERSION(6, 18, 7)

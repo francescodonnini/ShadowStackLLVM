@@ -1,3 +1,4 @@
+// SPDX-License-Identifier: GPL-2.0
 #include "api.h"
 #include "pt_bindings.h"
 #include <linux/highmem.h>
@@ -21,7 +22,7 @@ struct sa_pagelist {
 	struct list_head list; // gl_sa
 };
 
-static int gl_size = 0;
+static int gl_size;
 static LIST_HEAD(gl_sa);
 static DEFINE_SPINLOCK(gl_lock);
 
@@ -53,9 +54,8 @@ struct sa_tlb {
 
 static inline void sa_pagelist_free_pages(struct sa_pagelist *pagelist)
 {
-	while (pagelist->nr_pages--) {
+	while (pagelist->nr_pages--)
 		__free_page(pagelist->pages[pagelist->nr_pages]);
-	}
 
 	kvfree(pagelist->pages);
 	pagelist->pages = NULL;
@@ -172,9 +172,8 @@ static long gl_alloc_stack(struct sa_pagelist **p)
 
 	spin_unlock(&gl_lock);
 	pagelist = kmalloc(sizeof(*pagelist), GFP_KERNEL);
-	if (!pagelist) {
+	if (!pagelist)
 		return -ENOMEM;
-	}
 
 	nr_pages = SS_SIZE >> PAGE_SHIFT;
 	err = sa_pagelist_alloc_pages(GFP_KERNEL | __GFP_ZERO, nr_pages,
@@ -200,9 +199,8 @@ static void gl_free(struct sa_pagelist *pagelist)
 		return;
 	}
 
-	for (i = 0; i < pagelist->nr_pages; ++i) {
+	for (i = 0; i < pagelist->nr_pages; ++i)
 		clear_highpage(pagelist->pages[i]);
-	}
 
 	spin_lock(&gl_lock);
 	gl_size++;
@@ -228,9 +226,8 @@ static inline void sa_tlb_add(struct sa_tlb *tlb, void *page)
 	if ((*batch)->nr == MAX_BATCH_SIZE) {
 		int i;
 
-		for (i = 0; i < (*batch)->nr; ++i) {
+		for (i = 0; i < (*batch)->nr; ++i)
 			__free_page((*batch)->tables[i]);
-		}
 	}
 }
 
@@ -252,7 +249,9 @@ static inline void tlb_free_pte(struct sa_tlb *tlb, pgtable_t pte,
 static void free_pte_range(struct sa_tlb *tlb, pmd_t *pmd, unsigned long addr,
 			   unsigned long end)
 {
-	pgtable_t pte = pmd_pgtable(*pmd);
+	pgtable_t pte;
+
+	pte = pmd_pgtable(*pmd);
 	pmd_clear(pmd);
 	tlb_free_pte(tlb, pte, addr);
 	mm_dec_nr_ptes(tlb->mm);
@@ -270,9 +269,8 @@ static void free_pmd_range(struct sa_tlb *tlb, pud_t *pud, unsigned long addr,
 	pmd = pmd_offset(pud, addr);
 	do {
 		next = pmd_addr_end(addr, end);
-		if (pmd_none(*pmd) || pmd_bad(*pmd)) {
+		if (pmd_none(*pmd) || pmd_bad(*pmd))
 			continue;
-		}
 
 		free_pte_range(tlb, pmd, addr, next);
 	} while (pmd++, addr = next, addr != end);
@@ -308,9 +306,8 @@ static void free_pud_range(struct sa_tlb *tlb, p4d_t *p4d, unsigned long addr,
 	pud = pud_offset(p4d, addr);
 	do {
 		next = pud_addr_end(addr, end);
-		if (pud_none(*pud) || pud_bad(*pud)) {
+		if (pud_none(*pud) || pud_bad(*pud))
 			continue;
-		}
 
 		free_pmd_range(tlb, pud, addr, next, floor, ceiling);
 	} while (pud++, addr = next, addr != next);
@@ -346,9 +343,8 @@ static void free_p4d_range(struct sa_tlb *tlb, pgd_t *pgd, unsigned long addr,
 	p4d = p4d_offset(pgd, addr);
 	do {
 		next = p4d_addr_end(addr, end);
-		if (p4d_none(*p4d) || p4d_bad(*p4d)) {
+		if (p4d_none(*p4d) || p4d_bad(*p4d))
 			continue;
-		}
 
 		free_pud_range(tlb, p4d, addr, next, floor, ceiling);
 	} while (p4d++, addr = next, addr != end);
@@ -384,32 +380,28 @@ static void __free_pgd_range(struct sa_tlb *tlb, unsigned long addr,
 	addr &= PMD_MASK;
 	if (addr < floor) {
 		addr += PMD_SIZE;
-		if (!addr) {
+		if (!addr)
 			return;
-		}
 	}
 
 	if (ceiling) {
 		ceiling &= PMD_MASK;
-		if (!ceiling) {
+		if (!ceiling)
 			return;
-		}
 	}
 
-	if (end - 1 > ceiling - 1) {
+	if (end - 1 > ceiling - 1)
 		end -= PMD_SIZE;
-	}
 
-	if (addr > end - 1) {
+	if (addr > end - 1)
 		return;
-	}
 
 	pgd = pgd_offset(tlb->mm, addr);
 	do {
 		next = pgd_addr_end(addr, end);
-		if (pgd_none(*pgd) || pgd_bad(*pgd)) {
+		if (pgd_none(*pgd) || pgd_bad(*pgd))
 			continue;
-		}
+
 		free_p4d_range(tlb, pgd, addr, next, floor, ceiling);
 	} while (pgd++, addr = next, addr != end);
 }
@@ -450,10 +442,8 @@ struct sa_allocator_desc *alloc_create(pid_t tgid, struct mm_struct *mm)
 	long err;
 
 	alloc = kmalloc(sizeof(*alloc), GFP_KERNEL);
-	if (!alloc) {
-		pr_err("out of memory");
+	if (!alloc)
 		return NULL;
-	}
 
 	alloc->tgid = tgid;
 	atomic64_set(&alloc->max_id, 0);
@@ -500,9 +490,8 @@ static struct sa_allocator_desc *alloc_get(pid_t tgid)
 	struct sa_allocator_desc *alloc;
 
 	alloc = alloc_find(tgid);
-	if (alloc && kref_get_unless_zero(&alloc->kref)) {
+	if (alloc && kref_get_unless_zero(&alloc->kref))
 		return alloc;
-	}
 
 	return NULL;
 }
@@ -512,9 +501,8 @@ static inline int clear_pte(pte_t *pte, unsigned long addr, void *data)
 	struct mm_struct *mm;
 
 	mm = data;
-	if (!pte_none(ptep_get(pte))) {
+	if (!pte_none(ptep_get(pte)))
 		pte_clear(mm, addr, pte);
-	}
 
 	return 0;
 }
@@ -636,17 +624,15 @@ static long map_range(struct mm_struct *mm, unsigned long addr,
 
 static inline void atomic64_max(atomic64_t *curr, s64 id)
 {
+	s64 old;
+
+	old = atomic64_read(curr);
 	for (;;) {
-		s64 old;
-
-		old = atomic64_read(curr);
-		if (old >= id) {
+		if (old >= id)
 			return;
-		}
 
-		if (atomic64_try_cmpxchg(curr, &old, id)) {
+		if (atomic64_try_cmpxchg(curr, &old, id))
 			return;
-		}
 	}
 }
 
@@ -663,14 +649,12 @@ long sa_alloc(uint64_t *addr)
 	struct sa_pagelist *stack;
 
 	mm = current->mm;
-	if (!mm) {
+	if (!mm)
 		return -EINVAL;
-	}
 
 	alloc = alloc_get(current->tgid);
-	if (!alloc) {
+	if (!alloc)
 		return -ENOMEM;
-	}
 
 	err = xa_alloc(&alloc->threads, &id, NULL, XA_LIMIT(0, THREADS_LIMIT),
 		       GFP_KERNEL);
@@ -722,18 +706,16 @@ long sa_fork(pid_t parent_tgid, pid_t parent_pid)
 	long err;
 	struct sa_thread_desc *thread;
 	struct sa_pagelist *stack;
-	unsigned long int id, *found;
+	unsigned long id, *found;
 	struct sa_thread_desc *t;
 
 	mm = current->mm;
-	if (!mm) {
+	if (!mm)
 		return -EINVAL;
-	}
 
 	child = alloc_get(current->tgid);
-	if (!child) {
+	if (!child)
 		return -ENOMEM;
-	}
 
 	parent = alloc_get(parent_tgid);
 	if (!parent) {
@@ -766,9 +748,8 @@ long sa_fork(pid_t parent_tgid, pid_t parent_pid)
 
 			from = t->pagelist;
 			to = thread->pagelist;
-			for (i = 0; i < from->nr_pages; ++i) {
+			for (i = 0; i < from->nr_pages; ++i)
 				copy_highpage(to->pages[i], from->pages[i]);
-			}
 
 			found = &id;
 			break;
@@ -789,9 +770,8 @@ long sa_fork(pid_t parent_tgid, pid_t parent_pid)
 			thread->pagelist);
 	mmap_write_unlock(mm);
 	my_flush_tlb_mm(mm);
-	if (!err) {
+	if (!err)
 		return 0;
-	}
 
 	xa_erase(&child->threads, id);
 	gl_free(stack);
@@ -812,26 +792,28 @@ long sa_free(uint64_t addr)
 	struct sa_thread_desc *t, *err;
 
 	mm = current->mm;
-	if (!mm) {
+	if (!mm)
 		return -EINVAL;
-	}
 
-	if (addr < SS_START || addr >= SS_END || (addr - SS_START) % SS_SIZE) {
+	if (addr < SS_START || addr >= SS_END || (addr - SS_START) % SS_SIZE)
 		return -EINVAL;
-	}
 
 	alloc = alloc_find(current->tgid);
-	if (!alloc) {
+	if (!alloc)
 		return -EINVAL;
-	}
 
 	id = (addr - SS_START) / SS_SIZE;
 	rcu_read_lock();
 	t = xa_load(&alloc->threads, id);
-	if (!t || (err = xa_cmpxchg(&alloc->threads, id, t, XA_ZERO_ENTRY,
-				    GFP_KERNEL)) != t) {
+	if (!t) {
 		rcu_read_unlock();
-		return !t ? -EINVAL : xa_err(err);
+		return -EINVAL;
+	}
+
+	err = xa_cmpxchg(&alloc->threads, id, t, XA_ZERO_ENTRY, GFP_KERNEL);
+	if (err != t) {
+		rcu_read_unlock();
+		return xa_err(err);
 	}
 
 	rcu_read_unlock();

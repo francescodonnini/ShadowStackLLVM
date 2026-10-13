@@ -1,3 +1,4 @@
+// SPDX-License-Identifier: GPL-2.0
 #include "api.h"
 #include "chrdev.h"
 #include "chrdev_ioctl.h"
