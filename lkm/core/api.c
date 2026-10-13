@@ -163,7 +163,7 @@ static long gl_alloc_stack(struct sa_pagelist **p)
 	}
 
 	spin_unlock(&gl_lock);
-	pagelist = kmalloc(sizeof(*pagelist), GFP_KERNEL);
+	pagelist = kmalloc_obj(*pagelist, GFP_KERNEL);
 	if (!pagelist)
 		return -ENOMEM;
 
@@ -433,7 +433,7 @@ struct sa_allocator_desc *alloc_create(pid_t tgid, struct mm_struct *mm)
 	struct sa_allocator_desc *alloc;
 	long err;
 
-	alloc = kmalloc(sizeof(*alloc), GFP_KERNEL);
+	alloc = kmalloc_obj(*alloc, GFP_KERNEL);
 	if (!alloc)
 		return NULL;
 
@@ -467,7 +467,7 @@ void alloc_destroy(struct sa_allocator_desc *alloc)
 	alloc_put(alloc);
 }
 
-static struct sa_allocator_desc *alloc_find(pid_t tgid)
+static inline struct sa_allocator_desc *alloc_find(pid_t tgid)
 {
 	struct sa_allocator_desc *alloc;
 
@@ -674,7 +674,7 @@ long sa_alloc(uint64_t *addr)
 		return err;
 	}
 
-	thread = kmalloc(sizeof(*thread), GFP_KERNEL);
+	thread = kmalloc_obj(*thread, GFP_KERNEL);
 	if (!thread) {
 		xa_erase(&alloc->threads, id);
 		alloc_put(alloc);
@@ -734,7 +734,7 @@ long sa_fork(pid_t parent_tgid, pid_t parent_pid)
 		return -ENOMEM;
 	}
 
-	thread = kmalloc(sizeof(*thread), GFP_KERNEL);
+	thread = kmalloc_obj(*thread, GFP_KERNEL);
 	if (!thread) {
 		alloc_put(child);
 		alloc_put(parent);
@@ -794,7 +794,6 @@ long sa_fork(pid_t parent_tgid, pid_t parent_pid)
 /**
  * sa_free - Destroys all the objects associated with a thread that used the shadow stack starting at `addr`.
  * @addr: The starting address of the shadow stack.
- * 
  * The address might be reused by another thread in the future and the pages associated with the virtual address
  * will be either put in the global free list or deallocated if the free list is full.
  * Takes mmap_write_lock() and zeroes the PTE entries in the range [addr, addr + SS_SIZE) hence issues a TLB invalidation.
