@@ -454,7 +454,6 @@ struct sa_allocator_desc *alloc_create(pid_t tgid, struct mm_struct *mm)
 		return NULL;
 	}
 
-	kref_get(&alloc->kref);
 	return alloc;
 }
 
