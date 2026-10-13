@@ -14,6 +14,7 @@
 #include <linux/version.h>
 #include <linux/vmalloc.h>
 
+#define addr_to_id(addr) ((u32)((addr - SS_START) / SS_SIZE))
 #define id_to_addr(id) (SS_START + (u64)(id) * SS_SIZE)
 #define GL_SA_CAPACITY (128)
 
@@ -818,21 +819,13 @@ long sa_free(uint64_t addr)
 	if (!alloc)
 		return -EINVAL;
 
-	id = (addr - SS_START) / SS_SIZE;
-	rcu_read_lock();
-	t = xa_load(&alloc->threads, id);
-	if (!t) {
-		rcu_read_unlock();
+	id = addr_to_id(addr);
+	down_write(&alloc->al_lock);
+	t = xa_erase(&alloc->threads, id);
+	up_write(&alloc->al_lock);
+	if (!t)
 		return -EINVAL;
-	}
 
-	err = xa_cmpxchg(&alloc->threads, id, t, XA_ZERO_ENTRY, GFP_KERNEL);
-	if (err != t) {
-		rcu_read_unlock();
-		return xa_err(err);
-	}
-
-	rcu_read_unlock();
 	mmap_write_lock(mm);
 	// only ptes are cleared because other threads might be using upper level tables and wasted
 	// space isn't too much anyway
