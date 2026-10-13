@@ -26,6 +26,7 @@ struct sa_allocator_desc {
     struct mm_struct    *mm;
     struct rw_semaphore  al_lock;
     struct xarray        threads;
+    atomic64_t           max_id;
     struct kref          kref;
 };
 

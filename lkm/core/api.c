@@ -416,6 +416,7 @@ struct sa_allocator_desc *alloc_create(pid_t tgid, struct mm_struct *mm) {
     }
 
     alloc->tgid = tgid;
+    atomic64_set(&alloc->max_id, 0);
     alloc->mm = mm;
     init_rwsem(&alloc->al_lock);
     xa_init_flags(&alloc->threads, XA_FLAGS_ALLOC);
@@ -572,16 +573,20 @@ static long map_range(struct mm_struct *mm, unsigned long addr,
     return err;
 }
 
-// static void update_highest_idx(atomic64_t *current, s64 id) {
-//     s64 old;
-// 
-//     old = atomic64_read(current);
-//     do {
-//         if (old >= id) {
-//             return;
-//         }
-//     } while (!atomic64_try_cmpxchg(current, old, id));
-// }
+static inline void atomic64_max(atomic64_t *curr, s64 id) {
+    for (;;) {
+        s64 old;
+
+        old = atomic64_read(curr);
+        if (old >= id) {
+            return;
+        }
+
+        if (atomic64_try_cmpxchg(curr, &old, id)) {
+            return;
+        }
+    }
+}
 
 /// Creates a new shadow area mapping for the current calling thread. The user-space virtual address is saved to `addr`.
 ///
@@ -639,7 +644,7 @@ long sa_alloc(uint64_t *addr) {
         xa_erase(&alloc->threads, id);
         alloc_put(alloc);
     } else {
-        // update_highest_idx();
+        atomic64_max(&alloc->max_id, id);
         xa_store(&alloc->threads, id, thread, GFP_KERNEL);
     }
     return err;
@@ -758,7 +763,7 @@ long sa_free(uint64_t addr) {
     t = xa_load(&alloc->threads, id);
     if (!t || (err = xa_cmpxchg(&alloc->threads, id, t, XA_ZERO_ENTRY, GFP_KERNEL)) != t) {
         rcu_read_unlock();
-        return xa_err(err);
+        return !t ? -EINVAL : xa_err(err);
     }
 
     rcu_read_unlock();
