@@ -1,5 +1,6 @@
 // SPDX-License-Identifier: GPL-2.0
 #include "api.h"
+#include "compat.h"
 #include "pt_bindings.h"
 #include <linux/highmem.h>
 #include <linux/io.h>
@@ -86,11 +87,7 @@ static long sa_pagelist_alloc_pages(gfp_t gfp, unsigned long nr_pages,
 		return -ENOMEM;
 
 	nr_allocated = 0;
-#if LINUX_VERSION_CODE < KERNEL_VERSION(6, 8, 0)
-	max_attempt_order = MAX_ORDER;
-#else
-	max_attempt_order = MAX_PAGE_ORDER;
-#endif
+	max_attempt_order = COMPAT_MAX_ORDER;
 	nr_remaining = nr_pages;
 	large_order =
 		min_t(unsigned int, max_attempt_order, ilog2(nr_remaining));
@@ -119,13 +116,8 @@ static long sa_pagelist_alloc_pages(gfp_t gfp, unsigned long nr_pages,
 		unsigned int nr_pages_request;
 
 		nr_pages_request = min(100UL, nr_pages - nr_allocated);
-#if LINUX_VERSION_CODE < KERNEL_VERSION(6, 14, 0)
-		nr = alloc_pages_bulk_array(gfp, nr_pages_request,
-					    pagelist->pages + nr_allocated);
-#else
-		nr = alloc_pages_bulk(gfp, nr_pages_request,
-				      pagelist->pages + nr_allocated);
-#endif
+		nr = compat_alloc_pages_bulk(gfp, nr_pages_request,
+					     pagelist->pages + nr_allocated);
 		nr_allocated += nr;
 		if (nr != nr_pages_request)
 			break;

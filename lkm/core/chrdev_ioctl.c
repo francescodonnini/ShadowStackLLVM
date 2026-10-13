@@ -64,14 +64,11 @@ long chrdev_ioctl(struct file *file, unsigned int cmd, unsigned long arg)
 	}
 	case IOCTL_SHADOW_FREE: {
 		struct ioctl_mem_params req;
-		unsigned long addr;
 
 		if (copy_from_user(&req, user_arg, sizeof(req)))
 			return -EFAULT;
 
 		req.error = sa_free(req.addr);
-		req.addr = addr;
-
 		if (copy_to_user(user_arg, &req, sizeof(req)))
 			return -EFAULT;
 
