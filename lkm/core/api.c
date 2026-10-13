@@ -711,13 +711,12 @@ err_put:
 long sa_fork(pid_t parent_tgid, pid_t parent_pid)
 {
 	struct mm_struct *mm;
-	struct sa_allocator_desc *child;
-	struct sa_allocator_desc *parent;
-	long err;
-	struct sa_thread_desc *thread;
+	struct sa_allocator_desc *child, *parent;
+	struct sa_thread_desc *thread, *t;
 	struct sa_pagelist *stack;
-	unsigned long id, *found;
-	struct sa_thread_desc *t;
+	unsigned long id, index;
+	bool found;
+	long err;
 
 	mm = current->mm;
 	if (!mm)
@@ -727,66 +726,73 @@ long sa_fork(pid_t parent_tgid, pid_t parent_pid)
 	if (!child)
 		return -ENOMEM;
 
-	parent = alloc_get(parent_tgid);
+	// No ref-count because the parent thread is blocked in fork() until this function returns,
+	// so the parent thread cannot exit and destroy the allocator
+	parent = alloc_find(parent_tgid);
 	if (!parent) {
-		alloc_put(child);
-		return -ENOMEM;
+		err = -ENOENT;
+		goto err_put;
 	}
 
 	thread = kmalloc_obj(*thread, GFP_KERNEL);
 	if (!thread) {
-		alloc_put(child);
-		alloc_put(parent);
-		return -ENOMEM;
+		err = -ENOMEM;
+		goto err_put;
 	}
 
 	err = gl_alloc_stack(&stack);
-	if (err) {
-		alloc_put(parent);
-		alloc_put(child);
-		return err;
-	}
+	if (err)
+		goto err_thread;
 
+	found = false;
+	id = 0;
 	down_read(&parent->al_lock);
-	thread->pagelist = stack;
-	thread->tid = current->pid;
-	found = NULL;
-	xa_for_each(&parent->threads, id, t) {
-		if (t->tid == parent_pid) {
-			struct sa_pagelist *from, *to;
-			int i;
+	xa_for_each(&parent->threads, index, t) {
+		int i;
 
-			from = t->pagelist;
-			to = thread->pagelist;
-			for (i = 0; i < from->nr_pages; ++i)
-				copy_highpage(to->pages[i], from->pages[i]);
+		if (t->tid != parent_pid)
+			continue;
 
-			found = &id;
-			break;
-		}
+		for (i = 0; i < t->pagelist->nr_pages; ++i)
+			copy_highpage(stack->pages[i], t->pagelist->pages[i]);
+
+		id = index;
+		found = true;
+		break;
 	}
 
 	up_read(&parent->al_lock);
 	if (!found) {
-		gl_free(stack);
-		kfree(thread);
-		alloc_put(parent);
-		alloc_put(child);
-		return -1; // ?
+		err = -ENOENT;
+		goto err_stack;
 	}
+
+	thread->tid = current->pid;
+	thread->addr = id_to_addr(id);
+	thread->pagelist = stack;
+	err = xa_insert(&child->threads, id, thread, GFP_KERNEL);
+	if (err)
+		goto err_stack;
 
 	mmap_write_lock(mm);
 	err = map_range(mm, thread->addr, thread->addr + SS_SIZE,
 			thread->pagelist);
 	mmap_write_unlock(mm);
 	my_flush_tlb_mm(mm);
-	if (!err)
-		return 0;
+	if (err)
+		goto err_erase;
 
+	atomic64_max(&child->max_id, id);
+	return 0;
+
+err_erase:
 	xa_erase(&child->threads, id);
+err_stack:
 	gl_free(stack);
-	alloc_put(child);
+err_thread:
 	kfree(thread);
+err_put:
+	alloc_put(child);
 	return err;
 }
 
