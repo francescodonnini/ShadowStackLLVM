@@ -653,10 +653,9 @@ long sa_alloc(uint64_t *addr)
 {
 	struct mm_struct *mm;
 	struct sa_allocator_desc *alloc;
+	struct sa_thread_desc *thread;
 	u32 id;
 	long err;
-	struct sa_thread_desc *thread;
-	struct sa_pagelist *stack;
 
 	mm = current->mm;
 	if (!mm)
@@ -668,43 +667,43 @@ long sa_alloc(uint64_t *addr)
 
 	err = xa_alloc(&alloc->threads, &id, NULL, XA_LIMIT(0, THREADS_LIMIT),
 		       GFP_KERNEL);
-	if (err) {
-		alloc_put(alloc);
-		return err;
-	}
+	if (err)
+		goto err_put;
 
 	thread = kmalloc_obj(*thread, GFP_KERNEL);
 	if (!thread) {
-		xa_erase(&alloc->threads, id);
-		alloc_put(alloc);
-		return -ENOMEM;
+		err = -ENOMEM;
+		goto err_erase;
 	}
 
-	err = gl_alloc_stack(&stack);
-	if (err) {
-		xa_erase(&alloc->threads, id);
-		kfree(thread);
-		alloc_put(alloc);
-		return -ENOMEM;
-	}
+	err = gl_alloc_stack(&thread->pagelist);
+	if (err)
+		goto err_thread;
 
 	*addr = id_to_addr(id);
 	thread->tid = current->pid;
-	thread->addr = *addr;
-	thread->pagelist = stack;
+	thread->addr = id_to_addr(id);
 	mmap_write_lock(mm);
-	err = map_range(mm, *addr, *addr + SS_SIZE, thread->pagelist);
+	err = map_range(mm, thread->addr, thread->addr + SS_SIZE,
+			thread->pagelist);
 	mmap_write_unlock(mm);
 	my_flush_tlb_mm(mm);
-	if (err) {
-		gl_free(thread->pagelist);
-		thread->pagelist = NULL;
-		xa_erase(&alloc->threads, id);
-		alloc_put(alloc);
-	} else {
-		atomic64_max(&alloc->max_id, id);
-		xa_store(&alloc->threads, id, thread, GFP_KERNEL);
-	}
+	if (err)
+		goto err_stack;
+
+	atomic64_max(&alloc->max_id, id);
+	xa_store(&alloc->threads, id, thread, GFP_KERNEL);
+	*addr = thread->addr;
+	return err;
+
+err_stack:
+	gl_free(thread->pagelist);
+err_thread:
+	kfree(thread);
+err_erase:
+	xa_erase(&alloc->threads, id);
+err_put:
+	alloc_put(alloc);
 	return err;
 }
 
