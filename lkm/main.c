@@ -7,35 +7,37 @@
 #include <linux/string.h>
 #include <linux/types.h>
 
-static int __init runtime_init(void) {
-    int err;
+static int __init runtime_init(void)
+{
+	int err;
 
-    if (boot_cpu_has(X86_FEATURE_PTI)) {
-        pr_info("PTI is enabled, shadow stack will be disabled");
-        return -EINVAL;
-    }
+	if (boot_cpu_has(X86_FEATURE_PTI)) {
+		pr_info("PTI is enabled, shadow stack will be disabled");
+		return -EINVAL;
+	}
 
-    if (resolve_symbols() < 0) {
-        return -1;
-    }
+	if (resolve_symbols() < 0) {
+		return -1;
+	}
 
-    debug_init();
+	debug_init();
 
-    err = chrdev_init();
-    if (err) {
-        goto out;
-    }
-    return err;
+	err = chrdev_init();
+	if (err) {
+		goto out;
+	}
+	return err;
 
 out:
-    debug_exit();
-    return err;
+	debug_exit();
+	return err;
 }
 
-static void __exit runtime_exit(void) {
-    debug_exit();
-    chrdev_cleanup();
-    vma_free();
+static void __exit runtime_exit(void)
+{
+	debug_exit();
+	chrdev_cleanup();
+	vma_free();
 }
 
 MODULE_AUTHOR("Francesco Donnini <donnini.francesco00@gmail.com>");

@@ -11,9 +11,9 @@
 #include <linux/xarray.h>
 
 /// WARNING: These two shouldn't be hard-coded but determined at runtime (probably should be kernel module variables)
-#define SS_START      (0xffffeb0000000000ULL)
-#define SS_END        (0xfffffc0000000000ULL)
-#define SS_SIZE       (8 * 1024 * 1024)
+#define SS_START (0xffffeb0000000000ULL)
+#define SS_END (0xfffffc0000000000ULL)
+#define SS_SIZE (8 * 1024 * 1024)
 #define THREADS_LIMIT ((SS_END - SS_START) / SS_SIZE)
 
 /// "Shadow area" allocator descriptor
@@ -22,15 +22,15 @@
 /// When a thread exits, its former shadow area is added to a free_list so it might be used by another thread.
 /// `kref` keeps track of how many threads might be using the allocator.
 struct sa_allocator_desc {
-    pid_t                tgid;
-    struct mm_struct    *mm;
-    struct rw_semaphore  al_lock;
-    struct xarray        threads;
-    atomic64_t           max_id;
-    struct kref          kref;
+	pid_t tgid;
+	struct mm_struct *mm;
+	struct rw_semaphore al_lock;
+	struct xarray threads;
+	atomic64_t max_id;
+	struct kref kref;
 };
 
-struct sa_allocator_desc* alloc_create(pid_t tgid, struct mm_struct *mm);
+struct sa_allocator_desc *alloc_create(pid_t tgid, struct mm_struct *mm);
 
 void alloc_destroy(struct sa_allocator_desc *alloc);
 
